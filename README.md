@@ -263,7 +263,7 @@ Specify custom MorphScore data location using the `--morphscore-config` flag; an
     "data_dir": "/path/to/morphscore/datasets",
     "by_split": false,
     "freq_scale": true,
-    "exclude_single_tok": talse
+    "exclude_single_tok": false
 }
 ```
 By default, MorphScore analysis is filtered to the languages given in the data configuration file (`--language-config`). This filtering requires languages be specified in particular language codes.
