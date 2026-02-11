@@ -99,54 +99,6 @@ python scripts/run_tokenizer_analysis.py --use-sample-data --save-full-results
 python scripts/run_tokenizer_analysis.py --use-sample-data --no-plots
 ```
 
-### Markdown Results Table
-
-Generate a cumulative Markdown leaderboard that grows across successive runs. Each run merges new tokenizer rows into the existing table — previously evaluated tokenizers are preserved, and re-evaluated ones are updated in place.
-
-```bash
-# Generate / update a local RESULTS.md (prompts for dataset name)
-python scripts/run_tokenizer_analysis.py --use-sample-data --update-results-md
-
-# Specify dataset name directly (no prompt)
-python scripts/run_tokenizer_analysis.py --use-sample-data --update-results-md --dataset flores
-
-# Custom output path
-python scripts/run_tokenizer_analysis.py --use-sample-data --update-results-md my_results.md
-```
-
-Each row is keyed by `tokenizer_name (user, dataset)` — so different users or different datasets produce separate rows, while re-running the same combination updates in place. If `--dataset` is not provided, you will be prompted to enter a dataset name (press Enter to use `"default"`).
-
-#### Sharing results via a dedicated git branch
-
-Use `scripts/update_remote.py` to push a local RESULTS.md to a dedicated branch (default: `results`) on the remote. The team can view the latest leaderboard on GitHub without polluting `main`/`master` history. It uses git plumbing internally, so it never switches your branch or touches your working tree.
-
-```bash
-# Step 1: Run analysis and generate local RESULTS.md
-python scripts/run_tokenizer_analysis.py --use-sample-data --update-results-md --dataset flores --no-plots
-
-# Step 2: Push to origin/results branch (creates the branch if needed)
-python scripts/update_remote.py
-
-# Custom file, remote, and branch
-python scripts/update_remote.py --results-file my_results.md --remote upstream --branch leaderboard
-
-# Validate local RESULTS.md format without pushing
-python scripts/update_remote.py --validate-local-results
-
-# Remove all your rows from the remote RESULTS.md
-python scripts/update_remote.py --remove-my-results
-
-# Verify
-git log origin/results --oneline
-git show origin/results:RESULTS.md
-```
-
-When multiple team members push, the remote file is fetched and merged first — rows added by others are preserved, and rows from the current run take priority for the same user + tokenizer + dataset combination.
-
-The `--validate-local-results` flag checks that the local file has the required columns (`Tokenizer`, `Dataset`, `User`, `Date`), well-formed composite keys, and consistent column counts. Validation runs automatically before every push.
-
-The `--remove-my-results` flag removes all rows belonging to your username from the remote RESULTS.md — useful for cleaning up after test runs or re-submitting results from scratch.
-
 ## Configuration Files
 
 The framework uses JSON configuration files to specify tokenizers, data files, and analysis settings. All configuration examples are provided below.
@@ -407,7 +359,6 @@ results/
 ├── latex_tables/                   # Academic publication tables
 │   ├── basic_metrics.tex
 │   └── comprehensive_analysis.tex
-├── RESULTS.md                     # Cumulative Markdown leaderboard (with --update-results-md)
 ├── analysis_results.json   # Key metrics summary
 ├── analysis_results_full.json     # Detailed results (with --save-full-results)
 ├── tokenized_data.pkl       # Pre-tokenized data (with --save-tokenized-data)
@@ -775,12 +726,7 @@ tokenizer_analysis/
     ├── plots.py                  # Core plotting functions
     ├── data_extraction.py        # Data extraction for plotting
     ├── latex_tables.py           # LaTeX table generation
-    ├── markdown_tables.py        # Markdown table generation and git push
     └── visualization_config.py   # Visualization configuration
-
-scripts/
-├── run_tokenizer_analysis.py     # Main CLI for analysis
-└── update_remote.py              # Push RESULTS.md to a remote git branch
 ```
 ## Contributing
 

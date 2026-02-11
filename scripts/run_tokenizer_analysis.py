@@ -444,23 +444,6 @@ Examples:
         help="JSON configuration file for custom LaTeX tables"
     )
     
-    # Markdown results table
-    parser.add_argument(
-        "--update-results-md",
-        nargs='?',
-        const='__default__',
-        default=None,
-        metavar='PATH',
-        help="Generate/update a cumulative Markdown results table. "
-             "Optionally provide a file path (default: <output-dir>/RESULTS.md)"
-    )
-    parser.add_argument(
-        "--dataset",
-        type=str,
-        default=None,
-        help="Dataset label for the RESULTS.md composite key and Dataset column. "
-             "If not provided, you will be prompted when using --update-results-md."
-    )
     # Plot generation options
     parser.add_argument(
         "--per-language-plots",
@@ -795,32 +778,6 @@ Examples:
         except Exception as e:
             logger.error(f"Error generating custom LaTeX tables: {e}")
     
-    # Generate / update Markdown results table if requested
-    if args.update_results_md is not None:
-        if args.update_results_md == '__default__':
-            md_path = os.path.join(args.output_dir, "RESULTS.md")
-        else:
-            md_path = args.update_results_md
-
-        # Prompt for dataset name if not provided via --dataset
-        dataset = args.dataset
-        if dataset is None:
-            dataset = input("Enter dataset name (or press Enter for 'default'): ").strip()
-            if not dataset:
-                dataset = "default"
-
-        logger.info(f"Updating Markdown results table at {md_path}")
-        try:
-            analyzer.generate_markdown_table(
-                results=results,
-                output_path=md_path,
-                update_existing=True,
-                dataset=dataset,
-            )
-            print(f"Markdown results table: {md_path}")
-        except Exception as e:
-            logger.error(f"Error generating Markdown results table: {e}")
-
     logger.info("Analysis complete!")
     print(f"\nResults saved to: {args.output_dir}")
     if not args.no_plots:
