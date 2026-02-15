@@ -66,6 +66,7 @@ class InformationTheoreticMetrics(BaseMetrics):
             if sum_p_alpha <= 0:
                 return 0.0
             return (1 / (1 - alpha)) * np.log2(sum_p_alpha)
+
     
     def compute_renyi_efficiency_analysis(self, tokenized_data: Dict[str, List[TokenizedData]]) -> Dict[str, Any]:
         """
@@ -100,14 +101,12 @@ class InformationTheoreticMetrics(BaseMetrics):
             
             for lang, lang_data in lang_groups.items():
                 lang_token_counts = Counter()
-                
                 for data in lang_data:
                     for token in data.tokens:
                         global_token_counts[token] += 1
                         lang_token_counts[token] += 1
-                
                 per_lang_token_counts[lang] = lang_token_counts
-            
+
             # Compute Rényi entropy for each alpha
             for alpha in self.renyi_alphas:
                 alpha_key = f'renyi_{alpha}'
@@ -152,6 +151,108 @@ class InformationTheoreticMetrics(BaseMetrics):
         
         return results
     
+    def compute_jsd(self, token_counts_1: Counter, token_counts_2: Counter, epsilon: float = 1e-8) -> float:
+        """
+        Compute Jensen-Shannon divergence between two token distributions.
+
+        Args:
+            token_counts_1: Counter of token frequencies for distribution 1
+            token_counts_2: Counter of token frequencies for distribution 2
+            epsilon: Optional additive smoothing for robustness
+
+        Returns:
+            Jensen-Shannon divergence (base-2)
+        """
+        if not token_counts_1 or not token_counts_2:
+            return 0.0
+
+        vocab = set(token_counts_1.keys()) | set(token_counts_2.keys())
+        if not vocab:
+            return 0.0
+
+        counts_1 = np.array([token_counts_1.get(token, 0) for token in vocab], dtype=np.float64)
+        counts_2 = np.array([token_counts_2.get(token, 0) for token in vocab], dtype=np.float64)
+
+        if epsilon > 0.0:
+            counts_1 = counts_1 + epsilon
+            counts_2 = counts_2 + epsilon
+
+        total_1 = counts_1.sum()
+        total_2 = counts_2.sum()
+        if total_1 <= 0.0 or total_2 <= 0.0:
+            return 0.0
+
+        p = counts_1 / total_1
+        q = counts_2 / total_2
+        m = 0.5 * (p + q)
+
+        def kl_divergence(a: np.ndarray, b: np.ndarray) -> float:
+            mask = a > 0.0
+            return float(np.sum(a[mask] * np.log2(a[mask] / b[mask])))
+
+        jsd = 0.5 * kl_divergence(p, m) + 0.5 * kl_divergence(q, m)
+        return max(0.0, jsd)
+    
+    def compute_vocabulary_overlap(self, tokenized_data: Dict[str, List[TokenizedData]]) -> Dict[str, Any]:
+        """
+        Compute Vocabulary Overlap for all tokenizers.
+        Vocabulary Overlap defined as in https://aclanthology.org/2023.findings-acl.350.pdf.
+        
+        Args:
+            tokenized_data: Dict mapping tokenizer names to TokenizedData lists
+            
+        Returns:
+            Dict with Vocabulary Overlap results
+        """
+        
+        results = {
+            'per_tokenizer': {},
+            # per-language here is language-pair
+            'per_language': {},
+            'pairwise_comparisons': {}
+        }
+        
+        for tok_name in self.tokenizer_names:
+            if tok_name not in tokenized_data:
+                continue
+                
+            tok_results = {}
+            tok_data = tokenized_data[tok_name]
+            
+            # Collect all tokens for global entropy
+            global_token_counts = Counter()
+            per_lang_token_counts = {}
+            
+            # Group data by language
+            lang_groups = TokenizedDataProcessor.group_by_language(tok_data)
+            
+            for lang, lang_data in lang_groups.items():
+                lang_token_counts = Counter()
+                for data in lang_data:
+                    for token in data.tokens:
+                        global_token_counts[token] += 1
+                        lang_token_counts[token] += 1
+                per_lang_token_counts[lang] = lang_token_counts
+
+            from itertools import combinations
+            for (lang_a, counts_a), (lang_b, counts_b) in combinations(per_lang_token_counts.items(), 2):
+                pair_key = f"{lang_a}-{lang_b}"
+                tok_results[pair_key] = self.compute_jsd(counts_a, counts_b)
+            results['per_tokenizer'][tok_name] = tok_results
+        
+            all_languages = [f"{lang_a}-{lang_b}" for (lang_a, _), (lang_b, _) in combinations(per_lang_token_counts.items(), 2)]
+            for lang in all_languages:
+                results['per_language'][lang] = {}
+                for tok_name in self.tokenizer_names:
+                    if tok_name in results['per_tokenizer'] and lang in results['per_tokenizer'][tok_name]:
+                        results['per_language'][lang][tok_name] =  results['per_tokenizer'][tok_name][lang]
+
+            # Compute pairwise comparisons for overlap
+            # Need overall score?
+            results['pairwise_comparisons'] = {}
+        
+        return results
+
     def compute_compression_ratio(self, tokenized_data: Dict[str, List[TokenizedData]]) -> Dict[str, Any]:
         """
         Compute compression ratios: average of individual (normalization_unit / tokens) ratios.
@@ -223,8 +324,176 @@ class InformationTheoreticMetrics(BaseMetrics):
         
         return results
         
-    
+    def compute_average_rank(self, token_counts: Counter,) -> float:
 
+
+        if not token_counts:
+            return 0.0
+        
+        total_count = sum(token_counts.values())
+        probabilities = [count / total_count for count in token_counts.values()]
+
+        sorted_probabilities = np.sort(probabilities)[::-1]
+        r_e = np.sum(sorted_probabilities * np.arange(len(probabilities)))
+        return r_e
+    
+    def compute_vocabulary_allocation(self, tokenized_data: Dict[str, List[TokenizedData]]) -> Dict[str, Any]:
+        """
+        Compute vocabulary allocation for all tokenizers.
+        
+        Args:
+            tokenized_data: Dict mapping tokenizer names to TokenizedData lists
+            
+        Returns:
+            Dict with Vocabulary Allocation results
+        """
+        results = {
+            'per_tokenizer': {},
+            'per_language': {},
+            'pairwise_comparisons': {}
+        }
+        
+        for tok_name in self.tokenizer_names:
+            if tok_name not in tokenized_data:
+                continue
+                
+            tok_results = {}
+            tok_data = tokenized_data[tok_name]
+            
+            # Collect all tokens for global entropy
+            global_token_counts = Counter()
+            per_lang_token_counts = {}
+            
+            # Group data by language
+            lang_groups = TokenizedDataProcessor.group_by_language(tok_data)
+            
+            for lang, lang_data in lang_groups.items():
+                lang_token_counts = Counter()
+                for data in lang_data:
+                    for token in data.tokens:
+                        global_token_counts[token] += 1
+                        lang_token_counts[token] += 1
+                per_lang_token_counts[lang] = lang_token_counts
+
+                
+            # Global entropy
+            global_entropy = self.compute_average_rank(global_token_counts)
+            tok_results['global'] = global_entropy
+            
+            # Per-language entropy
+            for lang, lang_counts in per_lang_token_counts.items():
+                lang_entropy = self.compute_average_rank(lang_counts)
+                tok_results[lang] = lang_entropy
+            
+            results['per_tokenizer'][tok_name] = tok_results
+        
+
+            for lang, _ in per_lang_token_counts.items():
+                results['per_language'][lang] = {}
+                for tok_name in self.tokenizer_names:
+                    if (tok_name  in results['per_tokenizer'] and lang in results['per_tokenizer'][tok_name]):
+                        results['per_language'][lang][tok_name] = results['per_tokenizer'][tok_name][lang]
+        
+        # Compute pairwise comparisons for Shannon entropy (alpha=1.0)
+        if 1.0 in self.renyi_alphas:
+            all_allocation_scores = {name: results['per_tokenizer'][name]['global'] 
+                               for name in self.tokenizer_names}
+            results['pairwise_comparisons']['shannon'] = self.compute_pairwise_comparisons(
+                all_allocation_scores, 'vocabularry allocation'
+            )
+        
+        return results
+
+    def compute_zipfs_score(self, token_counts: Counter) -> float:
+        """
+        Compute Zipf's score for token distribution.
+        
+        Args:
+            token_counts: Counter of token frequencies
+            
+        Returns:
+            Zipf's score value
+        """
+        if not token_counts:
+            return 0.0
+        
+        frequencies = np.array(sorted(token_counts.values(), reverse=True))
+        ranks = np.arange(1, len(frequencies) + 1)
+        
+        log_ranks = np.log10(ranks)
+        log_freqs = np.log10(frequencies)
+
+        from scipy import stats
+        _, _, r_value, _, _ = stats.linregress(log_ranks, log_freqs)
+        return r_value ** 2
+        
+    def compute_zipfian_alignment(self, tokenized_data: Dict[str, List[TokenizedData]]) -> Dict[str, Any]:
+        """
+        Compute Zipfian alignment for all tokenizers.
+        
+        Args:
+            tokenized_data: Dict mapping tokenizer names to TokenizedData lists
+            
+        Returns:
+            Dict with Zipfian alignment results
+        """
+        results = {
+            'per_tokenizer': {},
+            'per_language': {},
+            'pairwise_comparisons': {}
+        }
+        
+        for tok_name in self.tokenizer_names:
+            if tok_name not in tokenized_data:
+                continue
+                
+            tok_results = {}
+            tok_data = tokenized_data[tok_name]
+            
+            # Collect all tokens for global entropy
+            global_token_counts = Counter()
+            per_lang_token_counts = {}
+            
+            # Group data by language
+            lang_groups = TokenizedDataProcessor.group_by_language(tok_data)
+            
+            for lang, lang_data in lang_groups.items():
+                lang_token_counts = Counter()
+                for data in lang_data:
+                    for token in data.tokens:
+                        global_token_counts[token] += 1
+                        lang_token_counts[token] += 1
+                per_lang_token_counts[lang] = lang_token_counts
+
+                
+            # Global entropy
+            global_entropy = self.compute_zipfs_score(global_token_counts)
+            tok_results['global'] = global_entropy
+            
+            # Per-language entropy
+            for lang, lang_counts in per_lang_token_counts.items():
+                lang_entropy = self.compute_zipfs_score(lang_counts)
+                tok_results[lang] = lang_entropy
+            
+            results['per_tokenizer'][tok_name] = tok_results
+        
+
+            for lang, _ in per_lang_token_counts.items():
+                results['per_language'][lang] = {}
+                for tok_name in self.tokenizer_names:
+                    if (tok_name  in results['per_tokenizer'] and lang in results['per_tokenizer'][tok_name]):
+                        results['per_language'][lang][tok_name] = results['per_tokenizer'][tok_name][lang]
+        
+        # Compute pairwise comparisons for Shannon entropy (alpha=1.0)
+        if 1.0 in self.renyi_alphas:
+            all_zipfian_scores = {name: results['per_tokenizer'][name]['global'] 
+                               for name in self.tokenizer_names}
+            results['pairwise_comparisons']['shannon'] = self.compute_pairwise_comparisons(
+                all_zipfian_scores, 'Zipfian alignment'
+            )
+        
+        return results
+    
     def compute_unigram_distribution_metrics(self, tokenized_data: Dict[str, List[TokenizedData]]) -> Dict[str, Any]:
         """
         Computes metrics based on the unigram distribution of tokens for each language.
@@ -346,6 +615,9 @@ class InformationTheoreticMetrics(BaseMetrics):
         results['compression_ratio'] = self.compute_compression_ratio(tokenized_data)
         results['renyi_efficiency'] = self.compute_renyi_efficiency_analysis(tokenized_data)
         results['unigram_distribution_metrics'] = self.compute_unigram_distribution_metrics(tokenized_data)
+        results['vocabulary_overlap'] = self.compute_vocabulary_overlap(tokenized_data)
+        results['vocabulary_allocation'] = self.compute_vocabulary_allocation(tokenized_data)
+        results['zipfian_alignemnt'] = self.compute_zipfian_alignment(tokenized_data)
 
         return results
     
