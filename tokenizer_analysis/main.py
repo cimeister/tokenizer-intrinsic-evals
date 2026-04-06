@@ -751,7 +751,7 @@ class UnifiedTokenizerAnalyzer:
                         unk = s.get('unk_token_rate', 0.0)
                         ws = s.get('whitespace_fidelity', 0.0)
                         n = s.get('texts_analyzed', 0)
-                        print(f"{tok_name:20}: EM={em:.3f}  CER={cer:.4f}  UNK={unk:.4f}  WS={ws:.3f}  ({n} texts)")
+                        print( f"{tok_name:20}: " f"EM={(em if em is not None else float('nan')):.3f} " f"CER={(cer if cer is not None else float('nan')):.4f} " f"UNK={(unk if unk is not None else float('nan')):.4f} " f"WS={(ws if ws is not None else float('nan')):.3f} " f"({n} texts)" )
 
         print("\n" + "="*60)
     
