@@ -71,3 +71,6 @@ Thumbs.db
 # Others
 debug*
 old_*.py
+
+# Paper drafts (not for this repo)
+paper/

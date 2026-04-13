@@ -12,7 +12,7 @@ import logging
 from .base import BaseMetrics, TokenizedDataProcessor
 from ..core.input_types import TokenizedData
 from ..core.input_providers import InputProvider
-from ..config import TextMeasurementConfig, TextMeasurer, DEFAULT_LINE_MEASUREMENT_CONFIG
+from ..config import TextMeasurementConfig, TextMeasurer, DEFAULT_LINE_MEASUREMENT_CONFIG, DEFAULT_TEXT_MEASUREMENT_CONFIG
 from ..config.language_metadata import LanguageMetadata
 from ..constants import MIN_LANGUAGES_FOR_GINI
 
@@ -32,7 +32,7 @@ class TokenizerGiniMetrics(BaseMetrics):
                  language_metadata: Optional[LanguageMetadata] = None):
         super().__init__(input_provider)
         # Default to lines for fairness analysis (as was hardcoded before)
-        self.measurement_config = measurement_config or DEFAULT_LINE_MEASUREMENT_CONFIG
+        self.measurement_config = measurement_config or DEFAULT_TEXT_MEASUREMENT_CONFIG
         self.text_measurer = TextMeasurer(self.measurement_config)
         self.language_metadata = language_metadata
     

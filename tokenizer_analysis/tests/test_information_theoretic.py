@@ -255,3 +255,177 @@ class TestBigramEntropy:
         assert 'bigram_entropy' in results
         assert 'per_tokenizer' in results['bigram_entropy']
         assert tok in results['bigram_entropy']['per_tokenizer']
+
+
+# ======================================================================
+# TestTrigramEntropy
+# ======================================================================
+
+
+class TestTrigramEntropy:
+
+    def _make_metrics(self, tok_name: str, min_trigram_occurrences: int = 3) -> InformationTheoreticMetrics:
+        provider = _SimpleProvider(tok_name)
+        return InformationTheoreticMetrics(
+            provider, min_trigram_occurrences=min_trigram_occurrences,
+        )
+
+    def test_uniform_successors(self):
+        """Context (1,2) followed equally by 3,4,5,6,7 (5 times each) → η ≈ 1.0.
+
+        Use separate 3-token documents so context (1,2) is the only trigram
+        context and successor tokens never form new contexts.
+        """
+        tok = "tok"
+        m = self._make_metrics(tok)
+        docs = []
+        for _ in range(5):
+            for succ in [3, 4, 5, 6, 7]:
+                docs.append(_make_td_tokens(tok, [1, 2, succ]))
+        td = {tok: docs}
+        results = m.compute_trigram_entropy(td)
+        eta = results['per_tokenizer'][tok]['global_trigram_entropy']
+        assert eta == pytest.approx(1.0, abs=0.01)
+
+    def test_dominated_successor_exact(self):
+        """Context (1,2) followed by 3 (20x) and 4 (5x) → exact η value.
+
+        H = -(20/25)*log2(20/25) - (5/25)*log2(5/25)
+        H_max = log2(2)
+        η = H / H_max
+        """
+        import math
+        tok = "tok"
+        m = self._make_metrics(tok)
+        docs = []
+        for _ in range(20):
+            docs.append(_make_td_tokens(tok, [1, 2, 3]))
+        for _ in range(5):
+            docs.append(_make_td_tokens(tok, [1, 2, 4]))
+        td = {tok: docs}
+        results = m.compute_trigram_entropy(td)
+        eta = results['per_tokenizer'][tok]['global_trigram_entropy']
+
+        p1 = 20 / 25
+        p2 = 5 / 25
+        h = -(p1 * math.log2(p1) + p2 * math.log2(p2))
+        expected_eta = h / math.log2(2)
+        assert eta == pytest.approx(expected_eta)
+
+    def test_single_successor(self):
+        """Context (1,2) always followed by 3 → η = 0."""
+        tok = "tok"
+        m = self._make_metrics(tok)
+        docs = []
+        for _ in range(10):
+            docs.append(_make_td_tokens(tok, [1, 2, 3]))
+        td = {tok: docs}
+        results = m.compute_trigram_entropy(td)
+        eta = results['per_tokenizer'][tok]['global_trigram_entropy']
+        assert eta == pytest.approx(0.0)
+
+    def test_below_threshold(self):
+        """[1,2,3,4] has 2 trigrams, both contexts have <3 occurrences → all filtered."""
+        tok = "tok"
+        m = self._make_metrics(tok)
+        td = {tok: [_make_td_tokens(tok, [1, 2, 3, 4])]}
+        results = m.compute_trigram_entropy(td)
+        r = results['per_tokenizer'][tok]
+        assert r['global_trigram_entropy'] == pytest.approx(0.0)
+        assert r['global_types_evaluated'] == 0
+
+    def test_per_language_separation(self):
+        """Uniform lang should have higher η than skewed lang."""
+        tok = "tok"
+        m = self._make_metrics(tok)
+        # Uniform: context (1,2) → {3,4,5,6,7} each 5 times
+        uniform_docs = []
+        for _ in range(5):
+            for succ in [3, 4, 5, 6, 7]:
+                uniform_docs.append(_make_td_tokens(tok, [1, 2, succ], lang="uniform"))
+        # Skewed: context (1,2) → 3 (20x), 4 (5x)
+        skewed_docs = []
+        for _ in range(20):
+            skewed_docs.append(_make_td_tokens(tok, [1, 2, 3], lang="skewed"))
+        for _ in range(5):
+            skewed_docs.append(_make_td_tokens(tok, [1, 2, 4], lang="skewed"))
+
+        td = {tok: uniform_docs + skewed_docs}
+        results = m.compute_trigram_entropy(td)
+        uniform_eta = results['per_tokenizer'][tok]['per_language']['uniform']['trigram_entropy']
+        skewed_eta = results['per_tokenizer'][tok]['per_language']['skewed']['trigram_entropy']
+        assert uniform_eta > skewed_eta
+
+    def test_no_trigrams_short_docs(self):
+        """Documents with ≤2 tokens produce no trigrams → η = 0.0."""
+        tok = "tok"
+        m = self._make_metrics(tok)
+        td = {tok: [
+            _make_td_tokens(tok, [1, 2]),
+            _make_td_tokens(tok, [3]),
+        ]}
+        results = m.compute_trigram_entropy(td)
+        r = results['per_tokenizer'][tok]
+        assert r['global_trigram_entropy'] == pytest.approx(0.0)
+        assert r['global_total_trigrams'] == 0
+
+    def test_schema_keys_present(self):
+        """All expected keys should exist in the result."""
+        tok = "tok"
+        m = self._make_metrics(tok)
+        docs = []
+        for _ in range(5):
+            for succ in [3, 4, 5, 6, 7]:
+                docs.append(_make_td_tokens(tok, [1, 2, succ]))
+        td = {tok: docs}
+        results = m.compute_trigram_entropy(td)
+
+        assert 'per_tokenizer' in results
+        assert 'per_language' in results
+        assert 'pairwise_comparisons' in results
+        assert 'metadata' in results
+
+        tok_r = results['per_tokenizer'][tok]
+        assert 'global_trigram_entropy' in tok_r
+        assert 'global_total_trigrams' in tok_r
+        assert 'global_types_evaluated' in tok_r
+        assert 'global_types_excluded' in tok_r
+        assert 'per_language' in tok_r
+
+    def test_trigram_entropy_in_compute(self):
+        """compute() should include trigram_entropy in its results."""
+        tok = "tok"
+        provider = _SimpleProvider(tok)
+        m = InformationTheoreticMetrics(provider)
+        docs = []
+        for _ in range(5):
+            for succ in [3, 4, 5, 6, 7]:
+                docs.append(_make_td_tokens(tok, [1, 2, succ]))
+        td = {tok: docs}
+        results = m.compute(td)
+        assert 'trigram_entropy' in results
+        assert 'per_tokenizer' in results['trigram_entropy']
+        assert tok in results['trigram_entropy']['per_tokenizer']
+
+    def test_separate_threshold(self):
+        """Trigram threshold should be independent of bigram threshold."""
+        tok = "tok"
+        # Set bigram threshold high, trigram threshold low
+        provider = _SimpleProvider(tok)
+        m = InformationTheoreticMetrics(
+            provider, min_bigram_occurrences=100, min_trigram_occurrences=2,
+        )
+        # 3 occurrences of context (1,2) → should pass trigram threshold (2)
+        docs = []
+        for succ in [3, 4, 3]:
+            docs.append(_make_td_tokens(tok, [1, 2, succ]))
+        td = {tok: docs}
+
+        tri_results = m.compute_trigram_entropy(td)
+        tri_r = tri_results['per_tokenizer'][tok]
+        assert tri_r['global_types_evaluated'] > 0
+
+        bi_results = m.compute_bigram_entropy(td)
+        bi_r = bi_results['per_tokenizer'][tok]
+        # Bigram threshold is 100, so all types should be excluded
+        assert bi_r['global_types_evaluated'] == 0

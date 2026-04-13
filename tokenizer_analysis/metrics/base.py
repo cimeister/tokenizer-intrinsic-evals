@@ -38,12 +38,6 @@ class BaseMetrics(ABC):
     }
 
     def __init__(self, input_provider: InputProvider):
-        """
-        Initialize base metrics.
-
-        Args:
-            input_provider: InputProvider instance providing tokenized data
-        """
         self.input_provider = input_provider
         self.tokenizer_names = input_provider.get_tokenizer_names()
         self.language_metadata = None  # Can be set by subclasses
@@ -287,14 +281,15 @@ class BaseMetrics(ABC):
                 'sum': 0
             }
             
+        n = len(values)
         return {
-            'mean': np.mean(values),
-            'median': np.median(values),
-            'std': np.std(values),
-            'std_err': scipy.stats.sem(values),
-            'min': np.min(values),
-            'max': np.max(values),
-            'count': len(values),
+            'mean': float(np.mean(values)),
+            'median': float(np.median(values)),
+            'std': float(np.std(values, ddof=1)) if n > 1 else 0.0,
+            'std_err': float(scipy.stats.sem(values)) if n > 1 else 0.0,
+            'min': float(np.min(values)),
+            'max': float(np.max(values)),
+            'count': n,
             'sum': sum(values)
         }
     
@@ -341,78 +336,30 @@ class BaseMetrics(ABC):
     
     @staticmethod
     def validate_non_empty_data(data: Any, name: str) -> None:
-        """
-        Validate that data is not empty.
-        
-        Args:
-            data: Data to validate
-            name: Name of the data for error messages
-            
-        Raises:
-            ValueError: If data is empty
-        """
+        """Raise ValueError if data is empty."""
         if not data:
             raise ValueError(f"{name} cannot be empty")
     
     @staticmethod
     def validate_minimum_count(items: List[Any], min_count: int, name: str) -> None:
-        """
-        Validate that a list has at least min_count items.
-        
-        Args:
-            items: List to validate
-            min_count: Minimum required count
-            name: Name of the items for error messages
-            
-        Raises:
-            ValueError: If items list is too short
-        """
+        """Raise ValueError if len(items) < min_count."""
         if len(items) < min_count:
             raise ValueError(f"{name} must have at least {min_count} items, got {len(items)}")
     
     @staticmethod
     def validate_positive_number(value: float, name: str) -> None:
-        """
-        Validate that a number is positive.
-        
-        Args:
-            value: Number to validate
-            name: Name of the value for error messages
-            
-        Raises:
-            ValueError: If value is not positive
-        """
+        """Raise ValueError if value <= 0."""
         if value <= 0:
             raise ValueError(f"{name} must be positive, got {value}")
     
     @staticmethod
     def truncate_for_display(items: List[Any], max_count: int = MAX_ERROR_DISPLAY_COUNT) -> List[Any]:
-        """
-        Truncate a list for display purposes.
-        
-        Args:
-            items: List to truncate
-            max_count: Maximum number of items to keep
-            
-        Returns:
-            Truncated list
-        """
         if len(items) <= max_count:
             return items
         return items[:max_count]
     
     @staticmethod
     def format_list_for_display(items: List[Any], max_count: int = MAX_ERROR_DISPLAY_COUNT) -> str:
-        """
-        Format a list for display, truncating if necessary.
-        
-        Args:
-            items: List to format
-            max_count: Maximum number of items to show
-            
-        Returns:
-            Formatted string representation
-        """
         if len(items) <= max_count:
             return str(items)
         
@@ -421,16 +368,7 @@ class BaseMetrics(ABC):
     
     @abstractmethod
     def compute(self, tokenized_data: Optional[Dict[str, List[TokenizedData]]] = None) -> Dict[str, Any]:
-        """
-        Compute metrics using TokenizedData format.
-        
-        Args:
-            tokenized_data: Optional dict mapping tokenizer names to TokenizedData lists.
-                          If None, will use input_provider's data.
-            
-        Returns:
-            Metrics results dictionary
-        """
+        """If tokenized_data is None, uses input_provider data."""
         pass
 
 
@@ -476,30 +414,3 @@ class TokenizedDataProcessor:
             unique_tokens.update(data.tokens)
         return unique_tokens
     
-    @staticmethod
-    def validate_consistency(tokenized_data: List[TokenizedData], 
-                           expected_tokenizer: Optional[str] = None,
-                           expected_languages: Optional[List[str]] = None) -> bool:
-        """Validate that TokenizedData objects are consistent."""
-        if not tokenized_data:
-            return False
-        
-        # Check tokenizer consistency
-        if expected_tokenizer:
-            if not all(data.tokenizer_name == expected_tokenizer for data in tokenized_data):
-                return False
-        
-        # Check language consistency
-        if expected_languages:
-            found_languages = set(data.language for data in tokenized_data)
-            if not found_languages.issubset(set(expected_languages)):
-                return False
-        
-        # Check basic data integrity
-        for data in tokenized_data:
-            if not data.tokens or not isinstance(data.tokens, list):
-                return False
-            if not all(isinstance(token, int) for token in data.tokens):
-                return False
-        
-        return True

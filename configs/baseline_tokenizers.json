@@ -53,9 +53,9 @@
         "class": "hf",
       "path": "openai/gpt-oss-120b"
     },
-    "Apertus": {
+    "Ours": {
         "class": "hf",
-      "path": "swiss-ai/Apertus-8B-2509"},
+      "path": "anonymous/tokenizer-submission"},
       "SuperBPE default regex": {
         "class": "hf",
       "path": "test_tokenizers/superbpe.json"

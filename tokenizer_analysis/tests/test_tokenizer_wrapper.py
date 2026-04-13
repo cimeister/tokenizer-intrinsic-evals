@@ -308,3 +308,27 @@ class TestOffsetsCoverText:
             assert i in covered, (
                 f"Character {i} ({text[i]!r}) not covered by any token offset"
             )
+
+
+class TestBatchEncoding:
+    """encode_batch_with_offsets must match per-sample encode_with_offsets."""
+
+    @pytest.mark.parametrize("wrapper_name", ALL_WRAPPER_FIXTURES)
+    def test_batch_matches_single(self, wrapper_name, request):
+        wrapper = request.getfixturevalue(wrapper_name)
+        texts = [_TEST_TEXT, _TEST_TEXT_MULTI]
+        batch_results = wrapper.encode_batch_with_offsets(texts)
+        assert len(batch_results) == len(texts)
+        for text, (batch_ids, batch_offsets) in zip(texts, batch_results):
+            single_ids, single_offsets = wrapper.encode_with_offsets(text)
+            assert batch_ids == single_ids, (
+                f"{wrapper.get_name()}: batch IDs differ from single for {text!r}"
+            )
+            assert batch_offsets == single_offsets, (
+                f"{wrapper.get_name()}: batch offsets differ from single for {text!r}"
+            )
+
+    @pytest.mark.parametrize("wrapper_name", ALL_WRAPPER_FIXTURES)
+    def test_empty_batch(self, wrapper_name, request):
+        wrapper = request.getfixturevalue(wrapper_name)
+        assert wrapper.encode_batch_with_offsets([]) == []

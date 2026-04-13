@@ -217,7 +217,7 @@ class MorphScoreMetrics(BaseMetrics):
         
         # Handle error case
         if 'error' in morphscore_data:
-            print(f"\n🏛️ MORPHSCORE ANALYSIS")
+            print(f"\nMORPHSCORE ANALYSIS")
             print("-" * 40)
             print(f"Error: {morphscore_data['error']}")
             return
@@ -228,7 +228,7 @@ class MorphScoreMetrics(BaseMetrics):
         
         # Print configuration info
         metadata = morphscore_data.get('metadata', {})
-        print(f"\n⚙️ CONFIGURATION")
+        print(f"\nCONFIGURATION")
         print("-" * 40)
         print(f"By split: {metadata.get('by_split', 'N/A')}")
         print(f"Frequency scale: {metadata.get('freq_scale', 'N/A')}")
@@ -236,7 +236,7 @@ class MorphScoreMetrics(BaseMetrics):
         print(f"Target languages: {len(metadata.get('target_languages', []))}")
         
         # Print summary statistics
-        print(f"\n🎯 SUMMARY STATISTICS")
+        print(f"\nSUMMARY STATISTICS")
         print("-" * 40)
         
         for tok_name in self.tokenizer_names:
@@ -265,7 +265,7 @@ class MorphScoreMetrics(BaseMetrics):
         
         # Print detailed per-language results
         if per_lang:
-            print(f"\n📊 PER-LANGUAGE RESULTS")
+            print(f"\nPER-LANGUAGE RESULTS")
             print("-" * 60)
             
             for tok_name in self.tokenizer_names:

@@ -2,6 +2,7 @@
 Unified main module supporting both raw and pre-tokenized input modes.
 """
 
+import gc
 import logging
 import os
 from typing import Dict, List, Any, Optional, Tuple, Union
@@ -15,7 +16,6 @@ from .metrics.base import BaseMetrics
 from .metrics.basic import BasicTokenizationMetrics
 from .metrics.information_theoretic import InformationTheoreticMetrics
 from .metrics.gini import TokenizerGiniMetrics
-from .metrics.morphological import MorphologicalMetrics
 from .metrics.morphscore import MorphScoreMetrics
 from .metrics.math import DigitBoundaryMetrics
 from .metrics.code_ast import ASTBoundaryMetrics
@@ -46,7 +46,6 @@ class UnifiedTokenizerAnalyzer:
                  measurement_config: Optional[TextMeasurementConfig] = None,
                  language_metadata: Optional[LanguageMetadata] = None,
                  plot_save_dir: str = "results",
-                 morphological_config: Optional[Dict[str, str]] = None,
                  show_global_lines: bool = True,
                  morphscore_config: Optional[Dict[str, Any]] = None,
                  plot_tokenizers: Optional[List[str]] = None,
@@ -63,7 +62,6 @@ class UnifiedTokenizerAnalyzer:
             measurement_config: Configuration for text measurement method
             language_metadata: Optional language metadata for grouping
             plot_save_dir: Directory to save plots
-            morphological_config: Optional morphological dataset configuration
             show_global_lines: Whether to show global average reference lines in plots
             morphscore_config: Optional MorphScore configuration (requires raw tokenization)
             plot_tokenizers: Optional list of tokenizer names to include in plots
@@ -124,13 +122,6 @@ class UnifiedTokenizerAnalyzer:
             input_provider, measurement_config=measurement_config, language_metadata=language_metadata
         )
         
-        # Initialize morphological metrics if config provided
-        self.morphological_metrics = None
-        if morphological_config:
-            self.morphological_metrics = MorphologicalMetrics(
-                input_provider, morphological_config=morphological_config
-            )
-        
         # Initialize MorphScore metrics if config provided
         self.morphscore_metrics = None
         if morphscore_config:
@@ -174,7 +165,6 @@ class UnifiedTokenizerAnalyzer:
     
     def run_analysis(self,
                     save_plots: bool = True,
-                    include_morphological: bool = True,
                     include_morphscore: bool = True,
                     include_digit_boundary: bool = True,
                     include_code_ast: bool = True,
@@ -183,13 +173,12 @@ class UnifiedTokenizerAnalyzer:
                     verbose: bool = True,
                     save_tokenized_data: bool = False,
                     tokenized_data_path: str = None,
-                    cer_time_budget_s: float = 10.0) -> Dict[str, Any]:
+                    cer_time_budget_s: float = 30.0) -> Dict[str, Any]:
         """
         Run comprehensive tokenizer analysis.
 
         Args:
             save_plots: Whether to generate and save plots
-            include_morphological: Whether to include morphological analysis (not yet implemented)
             include_morphscore: Whether to include MorphScore analysis (requires access to tokenizers)
             include_reconstruction: Whether to include reconstruction fidelity analysis
             verbose: Whether to print detailed results
@@ -239,20 +228,14 @@ class UnifiedTokenizerAnalyzer:
         logger.info("Computing information-theoretic metrics...")
         info_results = self.info_metrics.compute(tokenized_data)
         results.update(info_results)
-        
+        del info_results
+
+        gc.collect()
+
         # Run Gini metrics
         logger.info("Computing Gini metrics...")
         gini_results = self.gini_metrics.compute(tokenized_data)
         results.update(gini_results)
-        
-        # Run morphological metrics if available
-        if self.morphological_metrics and include_morphological:
-            logger.info("Computing morphological metrics...")
-            morphological_results = self.morphological_metrics.compute(tokenized_data)
-            results.update(morphological_results)
-            
-            if verbose:
-                self.morphological_metrics.print_results(morphological_results)
         
         # Run MorphScore metrics if available
         if self.morphscore_metrics and include_morphscore:
@@ -310,7 +293,7 @@ class UnifiedTokenizerAnalyzer:
                            base_results: Optional[Dict[str, Any]] = None,
                            reference_line_method: str = 'macro',
                            include_reconstruction: bool = True,
-                           cer_time_budget_s: float = 10.0) -> Dict[str, Dict[str, Any]]:
+                           cer_time_budget_s: float = 30.0) -> Dict[str, Dict[str, Any]]:
         """
         Run analysis grouped by language categories.
         
@@ -368,18 +351,6 @@ class UnifiedTokenizerAnalyzer:
                 # Gini metrics
                 gini_results = self.gini_metrics.compute(filtered_data)
                 group_result.update(gini_results)
-                
-                # Morphological metrics - filter from base results if available to avoid recomputation
-                if self.morphological_metrics and base_results and 'morphological_alignment' in base_results:
-                    logger.info(f"Filtering morphological results for group {group_name} (avoiding recomputation)")
-                    morphological_results = self._filter_morphological_results(
-                        base_results['morphological_alignment'], group_languages
-                    )
-                    group_result['morphological_alignment'] = morphological_results
-                elif self.morphological_metrics:
-                    logger.info(f"Computing morphological results for group {group_name}")
-                    morphological_results = self.morphological_metrics.compute(filtered_data)
-                    group_result.update(morphological_results)
                 
                 # MorphScore metrics - filter from base results if available to avoid recomputation
                 if self.morphscore_metrics and base_results and 'morphscore' in base_results:
@@ -446,45 +417,6 @@ class UnifiedTokenizerAnalyzer:
         
         return filtered_data
     
-    def _filter_morphological_results(self, morph_results: Dict[str, Any], target_languages: List[str]) -> Dict[str, Any]:
-        """Filter morphological results to include only specified languages."""
-        filtered_results = {
-            'per_tokenizer': {},
-            'summary': {}
-        }
-        
-        # Filter per-tokenizer results
-        for tok_name, tok_data in morph_results.get('per_tokenizer', {}).items():
-            filtered_tok_data = {}
-            
-            # Filter each metric type
-            for metric_type, metric_data in tok_data.items():
-                if isinstance(metric_data, dict):
-                    filtered_metric_data = {}
-                    for lang, lang_data in metric_data.items():
-                        if lang in target_languages:
-                            filtered_metric_data[lang] = lang_data
-                    if filtered_metric_data:
-                        filtered_tok_data[metric_type] = filtered_metric_data
-                else:
-                    # Non-dict data (e.g., scalars) - keep as is
-                    filtered_tok_data[metric_type] = metric_data
-            
-            if filtered_tok_data:
-                filtered_results['per_tokenizer'][tok_name] = filtered_tok_data
-        
-        # Filter summary if it exists
-        if 'summary' in morph_results:
-            # Summary typically contains aggregate statistics that should be recomputed
-            # For now, copy the original summary (could be improved to recompute)
-            filtered_results['summary'] = morph_results['summary']
-        
-        # Add any metadata
-        if 'metadata' in morph_results:
-            filtered_results['metadata'] = morph_results['metadata']
-        
-        return filtered_results
-    
     def _filter_digit_boundary_results(self, db_results: Dict[str, Any], target_languages: List[str]) -> Dict[str, Any]:
         """Filter digit boundary alignment, entropy, or magnitude results to specified languages.
 
@@ -534,7 +466,7 @@ class UnifiedTokenizerAnalyzer:
             if ftok:
                 filtered["per_tokenizer"][tok_name] = ftok
 
-        # Copy summary as-is (could be recomputed but matches morphological pattern)
+        # Copy summary as-is
         if "summary" in db_results:
             filtered["summary"] = db_results["summary"]
 
@@ -746,12 +678,14 @@ class UnifiedTokenizerAnalyzer:
                 for tok_name in self.tokenizer_names:
                     if tok_name in summary:
                         s = summary[tok_name]
-                        em = s.get('exact_match_rate', 0.0)
-                        cer = s.get('mean_cer', 0.0)
-                        unk = s.get('unk_token_rate', 0.0)
-                        ws = s.get('whitespace_fidelity', 0.0)
+                        em = s.get('exact_match_rate') or 0.0
+                        cer = s.get('mean_cer')
+                        unk = s.get('unk_token_rate') or 0.0
+                        ws = s.get('whitespace_fidelity')
                         n = s.get('texts_analyzed', 0)
-                        print( f"{tok_name:20}: " f"EM={(em if em is not None else float('nan')):.3f} " f"CER={(cer if cer is not None else float('nan')):.4f} " f"UNK={(unk if unk is not None else float('nan')):.4f} " f"WS={(ws if ws is not None else float('nan')):.3f} " f"({n} texts)" )
+                        cer_str = f"{cer:.4f}" if cer is not None else "SKIP"
+                        ws_str = f"{ws:.3f}" if ws is not None else "SKIP"
+                        print(f"{tok_name:20}: EM={em:.3f}  CER={cer_str}  UNK={unk:.4f}  WS={ws_str}  ({n} texts)")
 
         print("\n" + "="*60)
     
@@ -781,7 +715,7 @@ class UnifiedTokenizerAnalyzer:
         Args:
             results: Analysis results dictionary
             output_dir: Output directory for table files. If None, uses plot_save_dir
-            table_types: List of table types to generate. Options: 'basic', 'information', 'morphological', 'comprehensive'
+            table_types: List of table types to generate. Options: 'basic', 'information', 'comprehensive'
             metrics: Dict mapping table types to specific metrics to include
             **formatting_options: Additional formatting options for LaTeX tables
             
@@ -823,13 +757,6 @@ class UnifiedTokenizerAnalyzer:
                     )
                     caption = "Information-Theoretic Metrics"
                     label = "tab:information_metrics"
-                    
-                elif table_type == 'morphological':
-                    table_content = latex_generator.generate_morphological_table(
-                        metrics.get('morphological', None)
-                    )
-                    caption = "Morphological Alignment Metrics"
-                    label = "tab:morphological_metrics"
                     
                 elif table_type == 'comprehensive':
                     table_content = latex_generator.generate_comprehensive_table(

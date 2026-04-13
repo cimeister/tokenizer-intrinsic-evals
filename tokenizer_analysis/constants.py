@@ -84,3 +84,5 @@ MIN_MORPHEME_LENGTH = 1
 MAX_MORPHEME_OVERLAP = 1.0
 
 PUNCTUATION = '.,!?;:"()[]{}'
+
+UNK_CANDIDATES = ['<unk>', '[UNK]', '<UNK>', 'unk', 'UNK', '\u2047', '<|endoftext|>']

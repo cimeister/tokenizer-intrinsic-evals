@@ -70,46 +70,83 @@ def get_metric_display_name(metric_key: str) -> str:
     return metric_names.get(metric_key, metric_key.replace('_', ' ').title())
 
 
-def get_ylabel(metric_key: str, metadata: Optional[Dict] = None) -> str:
-    """Get y-axis label for a metric."""
-    norm_method = 'units'
+# Direction of "better" performance for each metric. Unicode arrows are
+# appended to plot titles. Metrics absent from this map get no arrow.
+METRIC_BETTER_DIRECTION = {
+    'fertility': '↓',
+    'compression_rate': '↑',
+    'vocabulary_utilization': '↑',
+    'tokenizer_fairness_gini': '↓',
+    'bigram_entropy': '↑',
+    'trigram_entropy': '↑',
+    'shannon_entropy': '↑',
+    'renyi_efficiency': '↑',
+    'morphscore_recall': '↑',
+    'morphscore_precision': '↑',
+    'unk_percentage': '↓',
+    'utf8_token_integrity': '↑',
+    'utf8_char_split': '↓',
+}
+
+
+def _norm_unit(metadata: Optional[Dict]) -> str:
+    """Singular form of the normalization unit (e.g. 'byte', 'word')."""
+    norm_method = 'unit'
     if metadata:
-        norm_method = metadata.get('normalization_method', 'units')
-    
+        norm_method = metadata.get('normalization_method', 'unit')
+    return norm_method.rstrip('s')
+
+
+def get_ylabel(metric_key: str, metadata: Optional[Dict] = None) -> str:
+    """Get y-axis label for a metric, with units where applicable."""
+    norm = _norm_unit(metadata)
+
     labels = {
-        'fertility': f'Fertility (tokens/{norm_method.rstrip("s")})',
-        'compression_rate': f'Per {norm_method.rstrip("s").title()} Compression Rate',
+        'fertility': f'Fertility (tokens / {norm})',
+        'compression_rate': f'Compression ({norm}s / token)',
         'vocabulary_utilization': 'Vocabulary Utilization (%)',
         'tokenizer_fairness_gini': 'Gini Coefficient',
-        'bigram_entropy': 'Bigram Entropy (η)',
+        'bigram_entropy': 'Bigram Entropy Efficiency (η)',
+        'trigram_entropy': 'Trigram Entropy Efficiency (η)',
+        'shannon_entropy': 'Shannon Entropy (bits / token)',
+        'renyi_efficiency': 'Rényi Efficiency',
         'morphscore_recall': 'MorphScore Recall',
         'morphscore_precision': 'MorphScore Precision',
-        'unk_percentage': 'UNK Percentage (%)'
+        'unk_percentage': 'UNK Percentage (%)',
+        'utf8_token_integrity': 'Completeness Rate',
+        'utf8_char_split': 'Splits per 1k Tokens',
     }
     return labels.get(metric_key, metric_key.replace('_', ' ').title())
 
 
+def _arrow_suffix(metric_key: Optional[str]) -> str:
+    arrow = METRIC_BETTER_DIRECTION.get(metric_key)
+    return f' ({arrow})' if arrow else ''
+
+
 def get_plot_title(plot_type: str, metric_key: str = None, context: str = None) -> str:
-    """Get plot title."""
+    """Get plot title with a direction-of-better arrow appended where applicable."""
     metric_display = get_metric_display_name(metric_key) if metric_key else ''
-    
+    arrow = _arrow_suffix(metric_key)
+
     # Special cases for specific plots
     if metric_key == 'lorenz_curves':
         return 'Lorenz Curves - Cross-Language Fairness'
     elif metric_key == 'morphscore_recall':
-        return 'MorphScore Recall Comparison'  
+        return f'MorphScore Recall Comparison{arrow}'
     elif metric_key == 'morphscore_precision':
-        return 'MorphScore Precision Comparison'
+        return f'MorphScore Precision Comparison{arrow}'
     elif metric_key == 'tokenizer_fairness_gini' and plot_type == 'individual':
-        return 'Cross-Language Fairness (Gini Coefficient)'
-    
+        return f'Cross-Language Fairness (Gini Coefficient){arrow}'
+
     titles = {
-        'individual': f'{metric_display} Comparison',
-        'per_language': f'{metric_display} by Language', 
-        'faceted': f'Faceted Analysis: {metric_display}',
-        'grouped': f'{metric_display} by {context}' if context else f'{metric_display} Analysis'
+        'individual': f'{metric_display} Comparison{arrow}',
+        'per_language': f'{metric_display} by Language{arrow}',
+        'faceted': f'Faceted Analysis: {metric_display}{arrow}',
+        'grouped': (f'{metric_display} by {context}{arrow}' if context
+                    else f'{metric_display} Analysis{arrow}')
     }
-    return titles.get(plot_type, f'{metric_display} Analysis')
+    return titles.get(plot_type, f'{metric_display} Analysis{arrow}')
 
 def format_language_labels(lang_code):
     return lang_code.split('_')[0]
@@ -332,8 +369,8 @@ def plot_utf8_integrity(results: Dict[str, Any], save_path: str, tokenizer_names
         vi_labels, vi_vals = zip(*valid_integrity)
         vi_colors = colors[:len(vi_labels)]
         ax1.bar(vi_labels, vi_vals, color=vi_colors, alpha=0.8)
-        ax1.set_ylabel('Completeness Rate')
-        ax1.set_title('Token UTF-8 Completeness Rate')
+        ax1.set_ylabel(get_ylabel('utf8_token_integrity'))
+        ax1.set_title(f'Token UTF-8 Completeness Rate{_arrow_suffix("utf8_token_integrity")}')
         ax1.set_ylim(0, 1.05)
         ax1.tick_params(axis='x', rotation=45)
 
@@ -343,8 +380,8 @@ def plot_utf8_integrity(results: Dict[str, Any], save_path: str, tokenizer_names
         vs_labels, vs_vals = zip(*valid_splits)
         vs_colors = colors[:len(vs_labels)]
         ax2.bar(vs_labels, vs_vals, color=vs_colors, alpha=0.8)
-        ax2.set_ylabel('Splits per 1k Tokens')
-        ax2.set_title('Character Splits per 1k Tokens')
+        ax2.set_ylabel(get_ylabel('utf8_char_split'))
+        ax2.set_title(f'Character Splits per 1k Tokens{_arrow_suffix("utf8_char_split")}')
         ax2.tick_params(axis='x', rotation=45)
 
     plt.tight_layout()

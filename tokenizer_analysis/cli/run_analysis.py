@@ -3,7 +3,7 @@ Unified tokenizer analysis script supporting both raw tokenizers and pre-tokeniz
 
 Raw tokenizer examples:
 tokenizer-analysis --use-sample-data
-tokenizer-analysis --tokenizer-config configs/tokenizer_config.json --language-config configs/language_config.json --morphological-config configs/morphological_config.json --measurement-config configs/text_measurement_config_bytes.json --samples-per-lang 3000 --output-dir analysis_results --verbose --run-grouped-analysis
+tokenizer-analysis --tokenizer-config configs/tokenizer_config.json --language-config configs/language_config.json --measurement-config configs/text_measurement_config_bytes.json --samples-per-lang 3000 --output-dir analysis_results --verbose --run-grouped-analysis
 
 Pre-tokenized data examples:
 tokenizer-analysis --tokenized-data-file tokenized_data.json --language-config configs/language_config.json
@@ -123,11 +123,6 @@ def create_sample_language_metadata() -> str:
     with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
         json.dump(sample_metadata, f, indent=2)
         return f.name
-
-
-def create_sample_morphological_config() -> Dict[str, str]:
-    """Create sample morphological dataset configuration."""
-    return {}
 
 
 def create_sample_morphscore_config(data_dir: str = "morphscore_data") -> Dict[str, any]:
@@ -286,20 +281,6 @@ def _slim_tokenizer_entry(metric_name: str, tok_data: dict) -> dict:
             out['global'] = tok_data['global']
         if 'per_language' in tok_data:
             out['per_language'] = tok_data['per_language']
-
-    # --- Morphological alignment: strip raw 'values' arrays ---
-    elif metric_name == 'morphological_alignment':
-        for sub_metric, lang_data in tok_data.items():
-            if isinstance(lang_data, dict):
-                stripped = {}
-                for lang, entry in lang_data.items():
-                    if isinstance(entry, dict):
-                        stripped[lang] = {k: v for k, v in entry.items() if k != 'values'}
-                    else:
-                        stripped[lang] = entry
-                out[sub_metric] = stripped
-            else:
-                out[sub_metric] = lang_data
 
     # --- MorphScore ---
     elif metric_name == 'morphscore':
@@ -479,7 +460,7 @@ Examples:
   # Pairwise comparison only (restricts to 2 specific tokenizers)
   uv run tokenizer-analysis --pairwise tok1 tok2 --use-sample-data
   
-  # Skip morphological analysis and plots for faster processing
+  # Skip plots for faster processing
   uv run tokenizer-analysis --use-sample-data --no-plots
   
   # Enable MorphScore analysis with default settings
@@ -495,7 +476,7 @@ Examples:
   uv run tokenizer-analysis --use-sample-data --generate-latex-tables
   
   # Generate specific LaTeX table types
-  uv run tokenizer-analysis --use-sample-data --generate-latex-tables --latex-table-types basic morphological
+  uv run tokenizer-analysis --use-sample-data --generate-latex-tables --latex-table-types basic comprehensive
   
   # Generate per-language plots in addition to standard plots
   uv run tokenizer-analysis --use-sample-data --per-language-plots
@@ -538,11 +519,6 @@ Examples:
         help="JSON file with LanguageMetadata configuration (languages + analysis groups)"
     )
     parser.add_argument(
-        "--morphological-config",
-        type=str,
-        help="JSON file with morphological dataset configurations"
-    )
-    parser.add_argument(
         "--morphscore-config",
         type=str,
         help="JSON file with MorphScore configuration (requires raw tokenization)"
@@ -556,7 +532,7 @@ Examples:
         "--morphscore-data-dir",
         type=str,
         default="morphscore_data",
-        help="Directory containing morphological data for MorphScore analysis"
+        help="Directory containing data for MorphScore analysis"
     )
     parser.add_argument(
         "--measurement-config",
@@ -657,7 +633,7 @@ Examples:
         "--latex-table-types",
         nargs="+",
         default=["basic", "comprehensive"],
-        choices=["basic", "information", "morphological", "comprehensive"],
+        choices=["basic", "information", "comprehensive"],
         help="Types of (default) LaTeX tables to generate"
     )
     parser.add_argument(
@@ -790,7 +766,6 @@ def run_from_args(args: argparse.Namespace):
         logger.info("Using sample data for demonstration")
         tokenizer_configs = create_sample_configs()
         language_config_path = create_sample_language_metadata()
-        morphological_config = create_sample_morphological_config()
         measurement_config = None  # Use default for sample data
         
         # Configure MorphScore for sample data
@@ -828,17 +803,13 @@ def run_from_args(args: argparse.Namespace):
             language_config_path = create_sample_language_metadata()
             logger.warning("No language config specified, using sample metadata")
         
-        morphological_config = None
-        if args.morphological_config:
-            morphological_config = load_config_from_file(args.morphological_config)
-        
         # Load text measurement configuration
         measurement_config = None
         if args.measurement_config:
             from tokenizer_analysis.config import TextMeasurementConfig
             measurement_config_dict = load_config_from_file(args.measurement_config)
             measurement_config = TextMeasurementConfig.from_dict(measurement_config_dict)
-        
+
         # MorphScore not supported with pre-tokenized data
         morphscore_config = None
         if args.morphscore or args.morphscore_config:
@@ -862,10 +833,6 @@ def run_from_args(args: argparse.Namespace):
         else:
             language_config_path = create_sample_language_metadata()
             logger.warning("No language config specified, using sample metadata")
-        
-        morphological_config = None
-        if args.morphological_config:
-            morphological_config = load_config_from_file(args.morphological_config)
         
         # Load text measurement configuration
         measurement_config = None
@@ -899,7 +866,6 @@ def run_from_args(args: argparse.Namespace):
             measurement_config=measurement_config,
             language_metadata=language_metadata,
             plot_save_dir=args.output_dir,
-            morphological_config=morphological_config,
             morphscore_config=morphscore_config,
             code_ast_config=code_ast_config,
             show_global_lines=not args.no_global_lines,
@@ -945,7 +911,6 @@ def run_from_args(args: argparse.Namespace):
             measurement_config=measurement_config,
             language_metadata=language_metadata,
             plot_save_dir=args.output_dir,
-            morphological_config=morphological_config,
             morphscore_config=morphscore_config,
             code_ast_config=code_ast_config,
             show_global_lines=not args.no_global_lines,
@@ -966,7 +931,7 @@ def run_from_args(args: argparse.Namespace):
         logger.info(f"Running pairwise comparison: {args.pairwise[0]} vs {args.pairwise[1]}")
         results = analyzer.run_analysis(
             save_plots=not args.no_plots,
-            include_morphological=morphological_config is not None,
+
             include_morphscore=morphscore_config is not None,
             include_digit_boundary=not args.no_digit_boundary,
             include_code_ast=not args.no_code_ast,
@@ -981,7 +946,7 @@ def run_from_args(args: argparse.Namespace):
         # Full multi-tokenizer analysis
         results = analyzer.run_analysis(
             save_plots=not args.no_plots,
-            include_morphological=morphological_config is not None,
+
             include_morphscore=morphscore_config is not None,
             include_digit_boundary=not args.no_digit_boundary,
             include_code_ast=not args.no_code_ast,
@@ -997,7 +962,7 @@ def run_from_args(args: argparse.Namespace):
             logger.info("Running grouped analysis by script families and resource levels...")
             
             # Use the unified analyzer's built-in grouped analysis
-            # Pass base results to avoid recomputing morphological metrics
+            # Pass base results to avoid recomputing metrics
             grouped_results = analyzer.run_grouped_analysis(
                 group_by=analyzer.language_metadata.analysis_groups.keys(),
                 save_plots=not args.no_plots,

@@ -10,13 +10,14 @@ import logging
 from .base import BaseMetrics, TokenizedDataProcessor
 from ..core.input_types import TokenizedData
 from ..core.input_providers import InputProvider
-from ..config import TextMeasurementConfig, TextMeasurer, DEFAULT_LINE_MEASUREMENT_CONFIG
+from ..config import TextMeasurementConfig, TextMeasurer, DEFAULT_LINE_MEASUREMENT_CONFIG, DEFAULT_TEXT_MEASUREMENT_CONFIG
 from ..config.language_metadata import LanguageMetadata
 from ..constants import DEFAULT_RENYI_ALPHAS, SHANNON_ENTROPY_ALPHA
 
 logger = logging.getLogger(__name__)
 
 MIN_BIGRAM_OCCURRENCES = 3
+MIN_TRIGRAM_OCCURRENCES = 3
 
 
 class InformationTheoreticMetrics(BaseMetrics):
@@ -26,7 +27,8 @@ class InformationTheoreticMetrics(BaseMetrics):
                  renyi_alphas: Optional[List[float]] = None,
                  measurement_config: Optional[TextMeasurementConfig] = None,
                  language_metadata: Optional[LanguageMetadata] = None,
-                 min_bigram_occurrences: int = MIN_BIGRAM_OCCURRENCES):
+                 min_bigram_occurrences: int = MIN_BIGRAM_OCCURRENCES,
+                 min_trigram_occurrences: int = MIN_TRIGRAM_OCCURRENCES):
         """
         Initialize information-theoretic metrics.
 
@@ -36,15 +38,18 @@ class InformationTheoreticMetrics(BaseMetrics):
             measurement_config: Configuration for text measurement method
             language_metadata: Optional language metadata for grouping
             min_bigram_occurrences: Minimum number of bigram occurrences for a
-                token type to be included in bigram entropy (default: 5)
+                token type to be included in bigram entropy (default: 3)
+            min_trigram_occurrences: Minimum number of trigram occurrences for a
+                context pair to be included in trigram entropy (default: 3)
         """
         super().__init__(input_provider)
         self.renyi_alphas = renyi_alphas or DEFAULT_RENYI_ALPHAS
         # Default to lines for information-theoretic analysis (as was hardcoded before)
-        self.measurement_config = measurement_config or DEFAULT_LINE_MEASUREMENT_CONFIG
+        self.measurement_config = measurement_config or DEFAULT_TEXT_MEASUREMENT_CONFIG
         self.text_measurer = TextMeasurer(self.measurement_config)
         self.language_metadata = language_metadata
         self.min_bigram_occurrences = min_bigram_occurrences
+        self.min_trigram_occurrences = min_trigram_occurrences
     
     def compute_renyi_entropy(self, token_counts: Counter, alpha: float) -> float:
         """
@@ -121,12 +126,14 @@ class InformationTheoreticMetrics(BaseMetrics):
                 
                 # Global entropy
                 global_entropy = self.compute_renyi_entropy(global_token_counts, alpha)
-                tok_results[alpha_key]['overall'] = global_entropy
+                global_vocab = len(global_token_counts)
+                tok_results[alpha_key]['overall'] = global_entropy / np.log2(global_vocab) if global_vocab > 1 else 0.0
                 
                 # Per-language entropy
                 for lang, lang_counts in per_lang_token_counts.items():
                     lang_entropy = self.compute_renyi_entropy(lang_counts, alpha)
-                    tok_results[alpha_key][lang] = lang_entropy
+                    lang_vocab = len(lang_counts)
+                    tok_results[alpha_key][lang] = lang_entropy / np.log2(lang_vocab) if lang_vocab > 1 else 0.0
             
             results['per_tokenizer'][tok_name] = tok_results
         
@@ -350,6 +357,55 @@ class InformationTheoreticMetrics(BaseMetrics):
     
         return results
 
+    @staticmethod
+    def _compute_weighted_entropy(right_accessors: Dict, min_occ: int) -> dict:
+        """Compute frequency-weighted normalized Shannon entropy (η) over
+        right-accessor distributions.
+
+        Args:
+            right_accessors: Mapping from context (any hashable key) to a
+                Counter of successor token IDs.
+            min_occ: Minimum total occurrences for a context to be included.
+
+        Returns:
+            Dict with keys 'entropy', 'total_ngrams', 'types_evaluated',
+            'types_excluded'.
+        """
+        weighted_sum = 0.0
+        weight_total = 0
+        total_ngrams = 0
+        types_evaluated = 0
+        types_excluded = 0
+
+        for t, successors in right_accessors.items():
+            ta = sum(successors.values())
+            total_ngrams += ta
+            if ta < min_occ:
+                types_excluded += 1
+                continue
+            n_unique = len(successors)
+            if n_unique <= 1:
+                # Only one successor type → entropy is 0, eta is 0
+                types_evaluated += 1
+                weight_total += ta
+                continue
+            # Shannon entropy
+            h = -sum((c / ta) * np.log2(c / ta) for c in successors.values())
+            # Normalize by max possible entropy
+            max_h = np.log2(min(n_unique, ta))
+            eta = h / max_h if max_h > 0 else 0.0
+            weighted_sum += ta * eta
+            weight_total += ta
+            types_evaluated += 1
+
+        entropy = weighted_sum / weight_total if weight_total else 0.0
+        return {
+            'entropy': entropy,
+            'total_ngrams': total_ngrams,
+            'types_evaluated': types_evaluated,
+            'types_excluded': types_excluded,
+        }
+
     def compute_bigram_entropy(self, tokenized_data: Dict[str, List[TokenizedData]]) -> Dict[str, Any]:
         """Compute frequency-weighted normalized Shannon entropy of right-accessor distributions.
 
@@ -379,43 +435,6 @@ class InformationTheoreticMetrics(BaseMetrics):
             }
         }
 
-        def _compute_weighted_entropy(right_accessors: Dict[int, Counter]) -> dict:
-            """Compute weighted bigram entropy from a right-accessor distribution."""
-            weighted_sum = 0.0
-            weight_total = 0
-            total_bigrams = 0
-            types_evaluated = 0
-            types_excluded = 0
-
-            for t, successors in right_accessors.items():
-                ta = sum(successors.values())
-                total_bigrams += ta
-                if ta < min_occ:
-                    types_excluded += 1
-                    continue
-                n_unique = len(successors)
-                if n_unique <= 1:
-                    # Only one successor type → entropy is 0, eta is 0
-                    types_evaluated += 1
-                    weight_total += ta
-                    continue
-                # Shannon entropy
-                h = -sum((c / ta) * np.log2(c / ta) for c in successors.values())
-                # Normalize by max possible entropy
-                max_h = np.log2(min(n_unique, ta))
-                eta = h / max_h if max_h > 0 else 0.0
-                weighted_sum += ta * eta
-                weight_total += ta
-                types_evaluated += 1
-
-            bigram_entropy = weighted_sum / weight_total if weight_total else 0.0
-            return {
-                'bigram_entropy': bigram_entropy,
-                'total_bigrams': total_bigrams,
-                'types_evaluated': types_evaluated,
-                'types_excluded': types_excluded,
-            }
-
         for tok_name in self.tokenizer_names:
             if tok_name not in tokenized_data:
                 continue
@@ -435,13 +454,19 @@ class InformationTheoreticMetrics(BaseMetrics):
                         lang_right_accessors[tokens[i]][tokens[i + 1]] += 1
                         global_right_accessors[tokens[i]][tokens[i + 1]] += 1
 
-                per_lang_metrics[lang] = _compute_weighted_entropy(lang_right_accessors)
+                lang_stats = self._compute_weighted_entropy(lang_right_accessors, min_occ)
+                per_lang_metrics[lang] = {
+                    'bigram_entropy': lang_stats['entropy'],
+                    'total_bigrams': lang_stats['total_ngrams'],
+                    'types_evaluated': lang_stats['types_evaluated'],
+                    'types_excluded': lang_stats['types_excluded'],
+                }
 
-            global_stats = _compute_weighted_entropy(global_right_accessors)
+            global_stats = self._compute_weighted_entropy(global_right_accessors, min_occ)
 
             results['per_tokenizer'][tok_name] = {
-                'global_bigram_entropy': global_stats['bigram_entropy'],
-                'global_total_bigrams': global_stats['total_bigrams'],
+                'global_bigram_entropy': global_stats['entropy'],
+                'global_total_bigrams': global_stats['total_ngrams'],
                 'global_types_evaluated': global_stats['types_evaluated'],
                 'global_types_excluded': global_stats['types_excluded'],
                 'per_language': per_lang_metrics,
@@ -471,16 +496,108 @@ class InformationTheoreticMetrics(BaseMetrics):
 
         return results
 
+    def compute_trigram_entropy(self, tokenized_data: Dict[str, List[TokenizedData]]) -> Dict[str, Any]:
+        """Compute frequency-weighted normalized Shannon entropy of right-accessor
+        distributions conditioned on bigram context.
+
+        For each bigram context (t₁, t₂) that appears as the left context of at
+        least min_trigram_occurrences trigrams, we compute the normalized Shannon
+        entropy (η) of the successor distribution P(t₃ | t₁, t₂). The final
+        score is the frequency-weighted mean of η across all qualifying contexts.
+
+        Args:
+            tokenized_data: Dict mapping tokenizer names to TokenizedData lists
+
+        Returns:
+            Dict with trigram entropy results per tokenizer and language.
+        """
+        min_occ = self.min_trigram_occurrences
+
+        results = {
+            'per_tokenizer': {},
+            'per_language': {},
+            'pairwise_comparisons': {},
+            'metadata': {
+                'description': 'Trigram Entropy — frequency-weighted normalized Shannon entropy of right-accessor distributions conditioned on bigram context',
+                'reference': 'Extension of Poelman et al. 2025 (Shannon efficiency η) to trigram contexts',
+                'metric_range': '[0.0, 1.0]',
+                'interpretation': 'Higher = more uniform successor distributions given bigram context',
+                'min_trigram_occurrences': min_occ,
+            }
+        }
+
+        for tok_name in self.tokenizer_names:
+            if tok_name not in tokenized_data:
+                continue
+
+            tok_data = tokenized_data[tok_name]
+            per_lang_metrics = {}
+            global_right_accessors: Dict[tuple, Counter] = defaultdict(Counter)
+
+            lang_groups = TokenizedDataProcessor.group_by_language(tok_data)
+
+            for lang, lang_data in lang_groups.items():
+                lang_right_accessors: Dict[tuple, Counter] = defaultdict(Counter)
+                for data in lang_data:
+                    tokens = data.tokens
+                    for i in range(len(tokens) - 2):
+                        context = (tokens[i], tokens[i + 1])
+                        lang_right_accessors[context][tokens[i + 2]] += 1
+                        global_right_accessors[context][tokens[i + 2]] += 1
+
+                lang_stats = self._compute_weighted_entropy(lang_right_accessors, min_occ)
+                per_lang_metrics[lang] = {
+                    'trigram_entropy': lang_stats['entropy'],
+                    'total_trigrams': lang_stats['total_ngrams'],
+                    'types_evaluated': lang_stats['types_evaluated'],
+                    'types_excluded': lang_stats['types_excluded'],
+                }
+
+            global_stats = self._compute_weighted_entropy(global_right_accessors, min_occ)
+
+            results['per_tokenizer'][tok_name] = {
+                'global_trigram_entropy': global_stats['entropy'],
+                'global_total_trigrams': global_stats['total_ngrams'],
+                'global_types_evaluated': global_stats['types_evaluated'],
+                'global_types_excluded': global_stats['types_excluded'],
+                'per_language': per_lang_metrics,
+            }
+
+        # Aggregate per-language results for cross-tokenizer comparison
+        all_languages = set()
+        for tok_results in results['per_tokenizer'].values():
+            all_languages.update(tok_results['per_language'].keys())
+
+        for lang in all_languages:
+            results['per_language'][lang] = {}
+            for tok_name in self.tokenizer_names:
+                if tok_name in results['per_tokenizer']:
+                    lang_data = results['per_tokenizer'][tok_name]['per_language'].get(lang)
+                    if lang_data:
+                        results['per_language'][lang][tok_name] = lang_data['trigram_entropy']
+
+        # Pairwise comparisons on global trigram entropy
+        global_entropies = {
+            name: res['global_trigram_entropy']
+            for name, res in results['per_tokenizer'].items()
+        }
+        results['pairwise_comparisons'] = self.compute_pairwise_comparisons(
+            global_entropies, 'trigram_entropy'
+        )
+
+        return results
+
     def compute(self, tokenized_data: Optional[Dict[str, List[TokenizedData]]] = None) -> Dict[str, Any]:
         """Compute all information-theoretic metrics."""
         if tokenized_data is None:
             tokenized_data = self.get_tokenized_data()
-            
+
         results = {}
-        
+
         results['compression_rate'] = self.compute_compression_rate(tokenized_data)
         results['renyi_efficiency'] = self.compute_renyi_efficiency_analysis(tokenized_data)
         results['unigram_distribution_metrics'] = self.compute_unigram_distribution_metrics(tokenized_data)
         results['bigram_entropy'] = self.compute_bigram_entropy(tokenized_data)
+        results['trigram_entropy'] = self.compute_trigram_entropy(tokenized_data)
 
         return results

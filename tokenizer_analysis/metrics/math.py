@@ -73,14 +73,15 @@ class DigitBoundaryMetrics(BaseMetrics):
     # it appears as a unary negative sign (e.g. ``-42``).  Disambiguating
     # unary minus from subtraction requires expression parsing, and for
     # tokenizer evaluation the simpler rule is sufficient.
-    _OPERATOR_SPAN = re.compile(r'(?:\*\*|<<|>>|<=|>=|==|!=|&&|\|\||[+\-*/=<>!&|^~%])')
+    _OPERATOR_SPAN = re.compile(r'(?:\*\*|//|<<|>>|<=|>=|=>|==|!=|&&|\|\||\?:|[+\-*/=<>!&|^~%])')
 
     _OPERATOR_CATEGORIES: Dict[str, List[str]] = {
-        "arithmetic": ["+", "-", "*", "/", "%", "**"],
+        "arithmetic": ["+", "-", "*", "/", "//", "%", "**"],
         "comparison": ["<", ">", "<=", ">=", "==", "!="],
-        "assignment": ["="],
+        "assignment": ["=", "=>"],
         "logical_bitwise": ["&", "|", "^", "~", "&&", "||"],
         "shift": ["<<", ">>"],
+        "ternary": ["?:"],
     }
     _OPERATOR_TO_CATEGORY: Dict[str, str] = {}
     for _cat, _ops in _OPERATOR_CATEGORIES.items():

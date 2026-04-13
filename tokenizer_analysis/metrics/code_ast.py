@@ -789,22 +789,25 @@ class ASTBoundaryMetrics(BaseMetrics):
                             alignment = self._check_boundary_alignment_fast(
                                 c_start, c_end, s2r_arr, c2t_arr, c2t_len
                             )
-                            if alignment is not None:
-                                acc[tok_name][code_lang][category].append(
-                                    alignment
-                                )
+                            if alignment is None:
+                                alignment = {
+                                    "start_aligned": False,
+                                    "end_aligned": False,
+                                    "fully_aligned": False,
+                                    "cross_boundary": True,
+                                }
+                            acc[tok_name][code_lang][category].append(alignment)
 
                             # Identifier fragmentation tracking
                             if category == "identifier":
                                 num_tokens = self._count_identifier_tokens_fast(
                                     c_start, c_end, s2r_arr, c2t_arr, c2t_len
                                 )
-                                if num_tokens is not None:
-                                    ident_acc[tok_name][code_lang].append({
-                                        "text": ident_texts[span_idx],
-                                        "num_tokens": num_tokens,
-                                        "fragmented": num_tokens > 1,
-                                    })
+                                ident_acc[tok_name][code_lang].append({
+                                    "text": ident_texts[span_idx],
+                                    "num_tokens": num_tokens if num_tokens is not None else -1,
+                                    "fragmented": num_tokens is None or num_tokens > 1,
+                                })
 
                     # Indentation consistency (whitespace-significant languages)
                     if indentation is not None:

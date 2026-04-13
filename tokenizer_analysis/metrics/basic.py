@@ -11,7 +11,7 @@ import time
 from .base import BaseMetrics, TokenizedDataProcessor
 from ..core.input_types import TokenizedData
 from ..core.input_providers import InputProvider
-from ..config import TextMeasurementConfig, TextMeasurer, DEFAULT_TEXT_MEASUREMENT_CONFIG
+from ..config import TextMeasurementConfig, TextMeasurer, DEFAULT_TEXT_MEASUREMENT_CONFIG, DEFAULT_WORD_MEASUREMENT_CONFIG
 from ..config.language_metadata import LanguageMetadata
 from ..utils.text_utils import load_math_data, BUILTIN_MATH_SAMPLES_PATH
 
@@ -30,7 +30,8 @@ class BasicTokenizationMetrics(BaseMetrics):
                  language_metadata: Optional[LanguageMetadata] = None,
                  code_texts: Optional[Dict[str, List[str]]] = None,
                  math_data_path: Optional[str] = None,
-                 use_builtin_math_data: bool = False):
+                 use_builtin_math_data: bool = False,
+                 fertility_use_global_config: bool = False):
         """
         Initialize basic metrics.
 
@@ -41,11 +42,17 @@ class BasicTokenizationMetrics(BaseMetrics):
             code_texts: Optional pre-loaded code texts mapping languages to snippets
             math_data_path: Optional path to math-rich text file
             use_builtin_math_data: Whether to use built-in math samples
+            fertility_use_global_config: If True, fertility uses *measurement_config*
+                instead of the default words-based normalization.
         """
         super().__init__(input_provider)
         self.measurement_config = measurement_config or DEFAULT_TEXT_MEASUREMENT_CONFIG
         self.language_metadata = language_metadata
-        self.text_measurer = TextMeasurer(self.measurement_config)
+        if fertility_use_global_config:
+            self.fertility_measurement_config = self.measurement_config
+        else:
+            self.fertility_measurement_config = DEFAULT_WORD_MEASUREMENT_CONFIG
+        self.fertility_text_measurer = TextMeasurer(self.fertility_measurement_config)
 
         # Code data for reconstruction fidelity (pre-loaded)
         self._code_texts: Dict[str, List[str]] = code_texts or {}
@@ -59,7 +66,7 @@ class BasicTokenizationMetrics(BaseMetrics):
 
     def compute(self, tokenized_data: Optional[Dict[str, List[TokenizedData]]] = None,
                 include_reconstruction: bool = True,
-                cer_time_budget_s: float = 10.0) -> Dict[str, Any]:
+                cer_time_budget_s: float = 30.0) -> Dict[str, Any]:
         """
         Compute basic tokenization metrics.
 
@@ -109,7 +116,7 @@ class BasicTokenizationMetrics(BaseMetrics):
         Returns:
             Dict with fertility results
         """
-        normalization_unit = self.measurement_config.method.value.lower()
+        normalization_unit = self.fertility_measurement_config.method.value.lower()
         
         results = {
             'fertility': {
@@ -141,6 +148,14 @@ class BasicTokenizationMetrics(BaseMetrics):
             
             for language, lang_data in lang_groups.items():
                 lang_fertility = self._compute_fertility_stats(lang_data, normalization_unit)
+                if lang_fertility['count'] == 0 and lang_data:
+                    logger.warning(
+                        "Fertility: language '%s' produced 0 valid samples. "
+                        "This typically occurs for languages without whitespace "
+                        "word boundaries (e.g., Chinese, Japanese, Thai) when "
+                        "using whitespace-based word counting.",
+                        language,
+                    )
                 per_lang_fertility[language] = lang_fertility
             
             results['fertility']['per_tokenizer'][tok_name] = {
@@ -171,7 +186,7 @@ class BasicTokenizationMetrics(BaseMetrics):
                 continue  # Skip if no text available
 
             num_tokens = len(data.tokens)
-            num_units = self.text_measurer.get_unit_count(data.text)
+            num_units = self.fertility_text_measurer.get_unit_count(data.text)
             
             if num_units > 0:
                 fertility = num_tokens / num_units
@@ -435,7 +450,7 @@ class BasicTokenizationMetrics(BaseMetrics):
 
     def compute_reconstruction_fidelity_analysis(
         self, tokenized_data: Dict[str, List[TokenizedData]],
-        cer_time_budget_s: float = 10.0,
+        cer_time_budget_s: float = 30.0,
     ) -> Dict[str, Any]:
         """Compute encode-decode round-trip fidelity metrics.
 

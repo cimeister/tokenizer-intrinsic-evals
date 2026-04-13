@@ -81,13 +81,6 @@ class TokenizedDataValidator:
         """
         result = ValidationResult(valid=True, errors=[], warnings=[], info=[])
         
-        try:
-            # Basic structure validation (handled by dataclass __post_init__)
-            pass
-        except Exception as e:
-            result.add_error(f"Basic validation failed: {e}")
-            return result
-        
         # Tokenizer name validation
         if expected_tokenizer and data.tokenizer_name != expected_tokenizer:
             result.add_error(f"Expected tokenizer '{expected_tokenizer}', got '{data.tokenizer_name}'")
@@ -301,13 +294,6 @@ class InputSpecificationValidator:
         """
         result = ValidationResult(valid=True, errors=[], warnings=[], info=[])
         
-        try:
-            # Mode validation (handled by __post_init__)
-            pass
-        except Exception as e:
-            result.add_error(f"Specification validation failed: {e}")
-            return result
-        
         if spec.is_raw_mode:
             result.merge(InputSpecificationValidator._validate_raw_mode(spec))
         elif spec.is_pretokenized_mode:
@@ -471,20 +457,17 @@ def validate_and_report(validation_result: ValidationResult,
     
     # Log errors
     for error in validation_result.errors:
-        log.error(f"❌ {error}")
-    
-    # Log warnings
+        log.error(error)
+
     for warning in validation_result.warnings:
-        log.warning(f"⚠️  {warning}")
-    
-    # Log info
+        log.warning(warning)
+
     for info in validation_result.info:
-        log.info(f"ℹ️  {info}")
-    
-    # Summary
+        log.info(info)
+
     if validation_result.valid:
-        log.info("✅ Validation passed")
+        log.info("Validation passed")
     else:
-        log.error(f"❌ Validation failed with {len(validation_result.errors)} errors")
+        log.error(f"Validation failed with {len(validation_result.errors)} errors")
     
     return validation_result.valid

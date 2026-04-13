@@ -12,6 +12,8 @@ import logging
 import os
 import glob
 
+from ..constants import UNK_CANDIDATES
+
 logger = logging.getLogger(__name__)
 
 
@@ -49,21 +51,14 @@ def _setup_fast_decode(tok):
 
 
 class TokenizerWrapper(ABC):
-    """
-    Abstract base class for tokenizer wrappers.
-    
-    This class defines the interface that all tokenizers must implement
-    to work with the tokenizer analysis framework.
-    """
+    """Abstract interface for tokenizer wrappers."""
     
     @abstractmethod
     def get_name(self) -> str:
-        """Get tokenizer name/identifier."""
         pass
-    
-    @abstractmethod 
+
+    @abstractmethod
     def get_vocab_size(self) -> int:
-        """Get vocabulary size."""
         pass
     
     @abstractmethod
@@ -73,63 +68,29 @@ class TokenizerWrapper(ABC):
     
     @abstractmethod
     def can_encode(self) -> bool:
-        """Whether this tokenizer can encode raw text."""
         pass
     
     @abstractmethod
     def encode(self, text: str) -> List[int]:
-        """
-        Encode text to token IDs. 
-        
-        Args:
-            text: Raw text to encode
-            
-        Returns:
-            List of token IDs
-            
-        Raises:
-            NotImplementedError: If can_encode() returns False
-        """
+        """Raises NotImplementedError if can_encode() returns False."""
         pass
     
     @abstractmethod
     def can_pretokenize(self) -> bool:
-        """Whether this tokenizer supports pretokenization."""
         pass
         
     @abstractmethod
     def pretokenize(self, text: str) -> List[str]:
-        """
-        Pretokenize text into subword units.
-        
-        Args:
-            text: Raw text to pretokenize
-            
-        Returns:
-            List of pretokenized string pieces
-            
-        Raises:
-            NotImplementedError: If can_pretokenize() returns False
-        """
+        """Raises NotImplementedError if can_pretokenize() returns False."""
         pass
     
     @classmethod
     @abstractmethod
     def from_config(cls, name: str, config: Dict[str, Any]) -> 'TokenizerWrapper':
-        """
-        Factory method to create tokenizer from config.
-        
-        Args:
-            name: Name/identifier for this tokenizer
-            config: Configuration dictionary
-            
-        Returns:
-            TokenizerWrapper instance
-        """
+        """Create tokenizer wrapper from config."""
         pass
     
     def can_decode(self) -> bool:
-        """Whether this tokenizer can decode token IDs back to text."""
         return False
 
     def decode(self, token_ids: List[int], skip_special_tokens: bool = True) -> Optional[str]:
@@ -148,6 +109,17 @@ class TokenizerWrapper(ABC):
         underlying tokenizer library provides character-offset information.
         """
         return self.encode(text), None
+
+    def encode_batch_with_offsets(
+        self, texts: List[str]
+    ) -> List[Tuple[List[int], Optional[List[Tuple[int, int]]]]]:
+        """Encode a batch of texts, returning ``(token_ids, offsets)`` per text.
+
+        The default implementation loops over :meth:`encode_with_offsets`.
+        Subclasses should override when the underlying library provides a
+        native batch API for better throughput.
+        """
+        return [self.encode_with_offsets(text) for text in texts]
 
     def get_underlying_tokenizer(self):
         """
@@ -184,12 +156,6 @@ class TokenizerWrapper(ABC):
         return None
 
     def has_unk_token(self) -> bool:
-        """
-        Check if tokenizer has an UNK token.
-
-        Returns:
-            True if tokenizer has an UNK token, False otherwise.
-        """
         return self.get_unk_token_id() is not None
     
     def get_metadata(self) -> Dict[str, Any]:
@@ -273,6 +239,42 @@ class HuggingFaceTokenizer(TokenizerWrapper):
         else:
             raise ValueError(f"Unexpected encoding result type: {type(result)}")
 
+    def encode_batch_with_offsets(
+        self, texts: List[str]
+    ) -> List[Tuple[List[int], Optional[List[Tuple[int, int]]]]]:
+        # Path A: tokenizers.Tokenizer with native encode_batch
+        if hasattr(self._tokenizer, 'encode_batch'):
+            encodings = self._tokenizer.encode_batch(texts, add_special_tokens=False)
+            results = []
+            for enc in encodings:
+                if hasattr(enc, 'ids') and hasattr(enc, 'offsets'):
+                    results.append((enc.ids, enc.offsets))
+                else:
+                    results.append((enc.ids, None))
+            return results
+
+        # Path B: transformers.PreTrainedTokenizerFast — batched __call__
+        if callable(getattr(self._tokenizer, '__call__', None)):
+            try:
+                batch_enc = self._tokenizer(
+                    texts,
+                    return_offsets_mapping=True,
+                    add_special_tokens=False,
+                )
+                if 'offset_mapping' in batch_enc:
+                    return [
+                        (ids, [tuple(p) for p in offsets])
+                        for ids, offsets in zip(
+                            batch_enc['input_ids'],
+                            batch_enc['offset_mapping'],
+                        )
+                    ]
+            except Exception:
+                pass
+
+        # Fallback: loop
+        return [self.encode_with_offsets(text) for text in texts]
+
     def can_decode(self) -> bool:
         return True
 
@@ -328,7 +330,7 @@ class HuggingFaceTokenizer(TokenizerWrapper):
         # Try getting it through the vocabulary
         vocab = self.get_vocab()
         if vocab:
-            unk_candidates = ['<unk>', '[UNK]', '<UNK>', 'unk', 'UNK', '⁇']
+            unk_candidates = UNK_CANDIDATES
             for candidate in unk_candidates:
                 if candidate in vocab:
                     return vocab[candidate]
@@ -424,6 +426,28 @@ class UniMixLMTokenizer(HuggingFaceTokenizer):
                 return best_enc.ids, best_enc.offsets
             return (best_enc.ids if best_enc is not None else []), None
         return super().encode_with_offsets(text)
+
+    def encode_batch_with_offsets(
+        self, texts: List[str]
+    ) -> List[Tuple[List[int], Optional[List[Tuple[int, int]]]]]:
+        # Langspec encoding evaluates each text against all per-language
+        # tokenizers; cannot use HuggingFaceTokenizer's native batch path.
+        return [self.encode_with_offsets(text) for text in texts]
+
+    def get_underlying_tokenizer(self):
+        """Return the base tokenizer.
+
+        For langspec UniMixLM tokenizers, this returns the base tokenizer,
+        not the per-language tokenizer selected during encoding.  Use
+        ``encode()`` on the wrapper for langspec-aware encoding.
+        """
+        if self.tokenizer_class == 'langspec':
+            logger.warning(
+                "%s: get_underlying_tokenizer() returns the base tokenizer. "
+                "For langspec-aware encoding, call encode() on the wrapper.",
+                self._name,
+            )
+        return self._tokenizer
 
     # ── overrides for base_tokenizer pre-tokenization ────────────────
 
@@ -631,7 +655,7 @@ class SentencePieceTokenizer(TokenizerWrapper):
 
         # Fallbacks: check common UNK pieces in the vocab
         vocab = self.get_vocab()
-        for candidate in ['<unk>', '[UNK]', '<UNK>', 'unk', 'UNK', '⁇']:
+        for candidate in UNK_CANDIDATES:
             if candidate in vocab:
                 return vocab[candidate]
 
@@ -729,12 +753,10 @@ class SentencePieceTokenizer(TokenizerWrapper):
 
 
 class CustomBPETokenizer(TokenizerWrapper):
-    """Wrapper for HuggingFace tokenizers."""
-    
+    """Wrapper for custom BPE tokenizers loaded from vocab.json and merges.txt."""
+
     def __init__(self, name: str, tokenizer, config: Dict[str, Any]):
         """
-        Initialize HuggingFace tokenizer wrapper.
-        
         Args:
             name: Tokenizer name
             tokenizer: HuggingFace tokenizer instance
@@ -763,6 +785,12 @@ class CustomBPETokenizer(TokenizerWrapper):
         """Encode text using custom BPE tokenizer and return offsets."""
         encoding = self._tokenizer.encode(text)
         return encoding.ids, encoding.offsets
+
+    def encode_batch_with_offsets(
+        self, texts: List[str]
+    ) -> List[Tuple[List[int], Optional[List[Tuple[int, int]]]]]:
+        encodings = self._tokenizer.encode_batch(texts)
+        return [(enc.ids, enc.offsets) for enc in encodings]
 
     def can_decode(self) -> bool:
         return True

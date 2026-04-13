@@ -13,65 +13,11 @@ import logging
 logger = logging.getLogger(__name__)
 
 from tokenizers import Tokenizer
-from tokenizers.models import Unigram, BPE
+from tokenizers.models import BPE
 from tokenizers.pre_tokenizers import Whitespace, ByteLevel, Sequence
 from tokenizers.decoders import ByteLevel as ByteLevelDecoder
 from transformers import AutoTokenizer
 
-
-def detect_unk_token_id(tokenizer_wrapper) -> Optional[int]:
-    """
-    Detect UNK token ID using multiple strategies.
-
-    Args:
-        tokenizer_wrapper: TokenizerWrapper instance
-
-    Returns:
-        UNK token ID or None if not found
-    """
-    # Strategy 1: Direct method from wrapper
-    if hasattr(tokenizer_wrapper, 'get_unk_token_id'):
-        unk_id = tokenizer_wrapper.get_unk_token_id()
-        if unk_id is not None:
-            return unk_id
-
-    # Strategy 2: Check vocabulary for common UNK tokens
-    vocab = tokenizer_wrapper.get_vocab()
-    if vocab:
-        unk_candidates = ['<unk>', '[UNK]', '<UNK>', 'unk', 'UNK', '⁇', '<|endoftext|>']
-        for candidate in unk_candidates:
-            if candidate in vocab:
-                return vocab[candidate]
-
-    # Strategy 3: Check underlying tokenizer
-    underlying = tokenizer_wrapper.get_underlying_tokenizer()
-    if underlying:
-        # HuggingFace transformers tokenizer
-        if hasattr(underlying, 'unk_token_id') and underlying.unk_token_id is not None:
-            return underlying.unk_token_id
-
-        # HuggingFace tokenizers library
-        if hasattr(underlying, 'token_to_id') and hasattr(underlying, 'get_vocab'):
-            # Try common UNK token strings
-            unk_candidates = ['<unk>', '[UNK]', '<UNK>', 'unk', 'UNK', '⁇']
-            for candidate in unk_candidates:
-                try:
-                    unk_id = underlying.token_to_id(candidate)
-                    if unk_id is not None:
-                        return unk_id
-                except:
-                    continue
-
-    # Strategy 4: Check for typical UNK behavior (ID 0, 1, 2, 3)
-    # This is a last resort and might not be reliable
-    for potential_unk_id in [0, 1, 2, 3]:
-        if potential_unk_id < tokenizer_wrapper.get_vocab_size():
-            # We can't easily test if this is actually UNK without encoding,
-            # so we'll skip this strategy for now
-            pass
-
-    logger.debug(f"No UNK token found for tokenizer {tokenizer_wrapper.get_name()}")
-    return None
 
 def load_tokenizer_from_config(config, name: str = "tokenizer"):
     """

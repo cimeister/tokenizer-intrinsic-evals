@@ -53,38 +53,42 @@ class RawTokenizationProvider(InputProvider):
                 try:
                     # Handle both single strings and lists of strings
                     if isinstance(text_data, str):
-                        # Single string
                         text_list = [text_data]
                     elif isinstance(text_data, list):
-                        # List of strings
                         text_list = text_data
                     else:
                         logger.error(f"Text for {language} is neither string nor list: {type(text_data)} - {text_data}")
                         raise ValueError(f"Text for {language} must be a string or list of strings, got {type(text_data)}")
-                    
-                    # Process each text in the list
+
+                    # Filter to valid texts
+                    valid_texts = []
                     for text in text_list:
-                        # Validate text is a string
                         if not isinstance(text, str):
                             logger.error(f"Text item for {language} is not a string: {type(text)} - {text}")
                             raise ValueError(f"Text item for {language} must be a string, got {type(text)}")
-                        
-                        # Ensure text is not empty
                         if not text.strip():
                             logger.debug(f"Empty text for {language}, skipping")
                             continue
-                        
-                        # Tokenize the text using TokenizerWrapper interface
-                        t0 = time.perf_counter()
-                        tokens, offsets = spec.tokenizer.encode_with_offsets(text)
-                        self._encode_times[tok_name].append(time.perf_counter() - t0)
+                        valid_texts.append(text)
 
-                        # Validate tokens are integers
+                    if not valid_texts:
+                        continue
+
+                    # Batch-encode all valid texts for this language
+                    t0 = time.perf_counter()
+                    batch_results = spec.tokenizer.encode_batch_with_offsets(valid_texts)
+                    batch_elapsed = time.perf_counter() - t0
+
+                    per_sample_time = batch_elapsed / len(valid_texts)
+                    self._encode_times[tok_name].extend(
+                        [per_sample_time] * len(valid_texts)
+                    )
+
+                    for text, (tokens, offsets) in zip(valid_texts, batch_results):
                         if not isinstance(tokens, list) or not all(isinstance(t, int) for t in tokens):
                             logger.error(f"Tokens for {language} are not a list of integers: {type(tokens)} - {tokens}")
                             raise ValueError(f"Tokens for {language} must be a list of integers, got {type(tokens)}")
 
-                        # Create TokenizedData object
                         data = TokenizedData(
                             tokenizer_name=tok_name,
                             language=language,
@@ -97,14 +101,21 @@ class RawTokenizationProvider(InputProvider):
                                 'text_length': len(text)
                             }
                         )
-                        
                         tokenized_data[tok_name].append(data)
                         logger.debug(f"Tokenized {language} text for {tok_name}: {len(tokens)} tokens")
-                    
+
                 except Exception as e:
                     logger.error(f"Error tokenizing {language} text for {tok_name}: {e}")
                     raise
         
+        # Cache language lists before freeing raw texts, since
+        # get_languages() reads from spec.texts.
+        self._languages_cache = {}
+        for tok_name, spec in self.specifications.items():
+            if spec.texts is not None:
+                self._languages_cache[tok_name] = list(spec.texts.keys())
+                spec.texts = None
+
         self._tokenized_cache = tokenized_data
         return tokenized_data
     
@@ -141,15 +152,21 @@ class RawTokenizationProvider(InputProvider):
     
     def get_languages(self, tokenizer_name: str = None) -> List[str]:
         """Get list of languages."""
+        cache = getattr(self, '_languages_cache', None)
         if tokenizer_name:
             if tokenizer_name not in self.specifications:
                 raise ValueError(f"Unknown tokenizer: {tokenizer_name}")
+            if cache and tokenizer_name in cache:
+                return list(cache[tokenizer_name])
             return list(self.specifications[tokenizer_name].texts.keys())
         else:
-            # Return all unique languages across all tokenizers
             all_languages = set()
-            for spec in self.specifications.values():
-                all_languages.update(spec.texts.keys())
+            if cache:
+                for langs in cache.values():
+                    all_languages.update(langs)
+            else:
+                for spec in self.specifications.values():
+                    all_languages.update(spec.texts.keys())
             return sorted(list(all_languages))
     
     def get_tokenizer(self, tokenizer_name: str) -> 'TokenizerWrapper':
