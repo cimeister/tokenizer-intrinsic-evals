@@ -78,3 +78,25 @@ paper/
 # Large PA-BPE tokenizers (~2.2 GiB) live in scratch; this subtree is a symlink, not tracked.
 # The small sample/reference tokenizers (bpe/unigramlm/gpt_4*.json) stay tracked for the docs/quickstart.
 /tokenizers/PA_BPE_tokenizers
+
+# Local Python environment
+intrinsic_eval_env/
+
+# Datasets provided locally, not tracked (download per docs; see morphscore/README.md)
+morphscore_data/
+test_tokenizers/
+
+# Analysis outputs
+newtoks_results/
+pabpe_test_results/
+
+# Job logs
+nohup.out
+*.out
+*.err
+
+# Symlink to shared dataset store (provide locally)
+/starcoder
+
+# Dated config backups
+configs/*.bak.*
