@@ -396,3 +396,100 @@ class TestWhitespaceFidelity:
         )
         assert total == 0
         assert preserved == 0
+
+    def test_unicode_zs_separators_count_as_whitespace(self):
+        """whitespace_fidelity counts Unicode Zs separators (NBSP / thin /
+        ideographic), not just ASCII.  NBSP->space is a real loss."""
+        from tokenizer_analysis.metrics.basic import _is_ws
+        for ch in (" ", "\t", "\n", "\r", " ", " ", "　"):
+            assert _is_ws(ch), repr(ch)
+        # NBSP folded to a regular space = the non-breaking property lost
+        assert BasicTokenizationMetrics._whitespace_fidelity(
+            "a b", "a b") == (0, 1)
+        assert BasicTokenizationMetrics._whitespace_fidelity(
+            "a　b", "a　b") == (1, 1)
+
+    def test_zwsp_cf_excluded_from_whitespace(self):
+        """ZWSP (U+200B, category Cf) is deliberately NOT whitespace -- its
+        loss is captured by exact_match_rate / CER, not whitespace_fidelity."""
+        from tokenizer_analysis.metrics.basic import _is_ws
+        assert _is_ws("​") is False
+        # ZWSP not counted -> total_ws stays 0 here
+        assert BasicTokenizationMetrics._whitespace_fidelity(
+            "a​b", "ab") == (0, 0)
+
+    def test_reconstruction_metadata_self_describes_definition(self):
+        """The widened definition is traceable in result metadata."""
+        from tokenizer_analysis.metrics.basic import WHITESPACE_DEFINITION
+        assert WHITESPACE_DEFINITION == "ascii(space,tab,nl,cr)+unicode_Zs"
+
+
+# ======================================================================
+# Vocabulary-utilization cross-language dispersion (per_language_std / cov)
+# ======================================================================
+
+class TestVocabUtilDispersion:
+
+    def test_dispersion_zero_when_one_language(self):
+        """Single language → SD == 0.0, CoV is None."""
+        tok = "t"
+        provider = _SimpleProvider(tok, vocab_size=100)
+        metrics = BasicTokenizationMetrics(provider)
+        td = {tok: [_make_td(tok, "x", [1, 2, 3, 4, 5], lang="eng_Latn")]}
+        out = metrics.compute_vocabulary_utilization_analysis(td)
+        per_tok = out["vocabulary_utilization"]["per_tokenizer"][tok]
+        assert per_tok["per_language_std"] == 0.0
+        assert per_tok["per_language_cov"] is None
+        assert per_tok["per_language_mean"] == pytest.approx(0.05)  # 5/100
+
+    def test_dispersion_known_value(self):
+        """Two langs with utilizations [0.2, 0.4] → mean 0.3, sd≈0.1414, cov≈0.4714."""
+        tok = "t"
+        provider = _SimpleProvider(tok, vocab_size=10)
+        metrics = BasicTokenizationMetrics(provider)
+        # eng uses 2 unique tokens out of 10 -> 0.2; fra uses 4 unique out of 10 -> 0.4
+        td = {tok: [
+            _make_td(tok, "x", [1, 2], lang="eng_Latn"),
+            _make_td(tok, "y", [3, 4, 5, 6], lang="fra_Latn"),
+        ]}
+        out = metrics.compute_vocabulary_utilization_analysis(td)
+        per_tok = out["vocabulary_utilization"]["per_tokenizer"][tok]
+        assert per_tok["per_language_mean"] == pytest.approx(0.3)
+        # Sample SD with ddof=1 of [0.2, 0.4]:
+        #   variance = ((0.2-0.3)^2 + (0.4-0.3)^2) / (2-1) = 0.02
+        #   sd = sqrt(0.02) ≈ 0.14142135
+        assert per_tok["per_language_std"] == pytest.approx(0.14142135, abs=1e-7)
+        assert per_tok["per_language_cov"] == pytest.approx(0.14142135 / 0.3, abs=1e-7)
+
+    def test_dispersion_uses_ratio_not_absolute_count(self):
+        """Two tokenizers with the same per-language ratios but different vocab
+        sizes must produce identical dispersion."""
+        small_tok, big_tok = "small", "big"
+
+        class TwoTokProvider(_SimpleProvider):
+            def get_tokenizer_names(self):
+                return [small_tok, big_tok]
+            def get_vocab_size(self, name):
+                return 10 if name == small_tok else 100
+            def get_languages(self, tokenizer_name=None):
+                return ["eng_Latn", "fra_Latn"]
+        provider = TwoTokProvider("ignored")
+        metrics = BasicTokenizationMetrics(provider)
+
+        td = {
+            # small_tok: 2/10 and 4/10  → ratios [0.2, 0.4]
+            small_tok: [
+                _make_td(small_tok, "x", [1, 2], lang="eng_Latn"),
+                _make_td(small_tok, "y", [3, 4, 5, 6], lang="fra_Latn"),
+            ],
+            # big_tok: 20/100 and 40/100 → ratios [0.2, 0.4]
+            big_tok: [
+                _make_td(big_tok, "x", list(range(20)), lang="eng_Latn"),
+                _make_td(big_tok, "y", list(range(20, 60)), lang="fra_Latn"),
+            ],
+        }
+        out = metrics.compute_vocabulary_utilization_analysis(td)
+        small = out["vocabulary_utilization"]["per_tokenizer"][small_tok]
+        big = out["vocabulary_utilization"]["per_tokenizer"][big_tok]
+        assert small["per_language_std"] == pytest.approx(big["per_language_std"], abs=1e-9)
+        assert small["per_language_cov"] == pytest.approx(big["per_language_cov"], abs=1e-9)

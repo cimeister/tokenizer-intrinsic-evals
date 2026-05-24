@@ -54,6 +54,46 @@ class TestCompositeKeyRegex:
         assert _COMPOSITE_KEY_RE.match("Tok [128k]") is None
 
 
+class TestVocabUtilCovColumn:
+    """Cross-lingual vocab-utilization CoV is surfaced as a markdown column,
+    reading the already-computed `per_language_cov` (None for <2-language
+    tokenizers -> the standard '---' placeholder)."""
+
+    @staticmethod
+    def _results(cov_a, cov_b):
+        return {
+            'vocabulary_utilization': {
+                'per_tokenizer': {
+                    'A': {'global_utilization': 0.5,
+                          'per_language_cov': cov_a},
+                    'B': {'global_utilization': 0.5,
+                          'per_language_cov': cov_b},
+                },
+                'metadata': {},
+            }
+        }
+
+    def test_cov_column_formatted_for_multilang(self):
+        md = MarkdownTableGenerator(
+            self._results(0.12345, 0.4),
+            ['A', 'B'],
+        ).generate_markdown_table(metrics=['vocab_util_cross_lingual_cov'])
+        assert 'Vocab Util. CoV' in md
+        assert '0.123' in md          # {:.3f} of 0.12345
+        assert '0.400' in md
+
+    def test_cov_placeholder_for_single_language_none(self):
+        # B is single-language -> per_language_cov is None -> '---'
+        md = MarkdownTableGenerator(
+            self._results(0.12345, None),
+            ['A', 'B'],
+        ).generate_markdown_table(metrics=['vocab_util_cross_lingual_cov'])
+        assert '0.123' in md          # A still rendered
+        assert '---' in md            # B rendered as the standard placeholder
+        # Column not dropped (not all-None): the title is present.
+        assert 'Vocab Util. CoV' in md
+
+
 class TestDisplayNameRegex:
     """_DISPLAY_NAME_RE must match names with [Nk] suffix."""
 

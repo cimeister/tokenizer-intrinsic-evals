@@ -62,6 +62,7 @@ def get_metric_display_name(metric_key: str) -> str:
         'fertility': 'Fertility',
         'compression_rate': 'Compression Rate',
         'vocabulary_utilization': 'Vocabulary Utilization',
+        'vocab_util_cross_lingual_cov': 'Vocab. Utilization CoV',
         'tokenizer_fairness_gini': 'Gini Coefficient',
         'bigram_entropy': 'Bigram Entropy',
         'morphscore': 'MorphScore',
@@ -76,6 +77,7 @@ METRIC_BETTER_DIRECTION = {
     'fertility': '↓',
     'compression_rate': '↑',
     'vocabulary_utilization': '↑',
+    'vocab_util_cross_lingual_cov': '↓',
     'tokenizer_fairness_gini': '↓',
     'bigram_entropy': '↑',
     'trigram_entropy': '↑',
@@ -105,6 +107,7 @@ def get_ylabel(metric_key: str, metadata: Optional[Dict] = None) -> str:
         'fertility': f'Fertility (tokens / {norm})',
         'compression_rate': f'Compression ({norm}s / token)',
         'vocabulary_utilization': 'Vocabulary Utilization (%)',
+        'vocab_util_cross_lingual_cov': 'Vocab. Utilization CoV (cross-lingual)',
         'tokenizer_fairness_gini': 'Gini Coefficient',
         'bigram_entropy': 'Bigram Entropy Efficiency (η)',
         'trigram_entropy': 'Trigram Entropy Efficiency (η)',
@@ -160,7 +163,8 @@ def save_plot(fig, filepath: str):
 
 def plot_metric_bar_chart(results: Dict[str, Any], save_path: str, tokenizer_names: List[str],
                           metric_key: str, value_extractor, show_global_lines: bool = True,
-                          ylim: Optional[tuple] = None, global_avg_fmt: str = '.2f'):
+                          ylim: Optional[tuple] = None, global_avg_fmt: str = '.2f',
+                          label_metric_key: Optional[str] = None):
     """Plot a bar chart for any metric.
 
     Args:
@@ -174,6 +178,10 @@ def plot_metric_bar_chart(results: Dict[str, Any], save_path: str, tokenizer_nam
         show_global_lines: Whether to draw a global average line.
         ylim: Optional (ymin, ymax) tuple for the y-axis.
         global_avg_fmt: Format string for the global average label.
+        label_metric_key: Optional distinct metric identity used only for the
+            title / y-axis label (when the results-index ``metric_key`` is a
+            shared parent, e.g. a sub-field of ``vocabulary_utilization``).
+            Defaults to ``metric_key``.
     """
     if metric_key not in results:
         return
@@ -191,10 +199,15 @@ def plot_metric_bar_chart(results: Dict[str, Any], save_path: str, tokenizer_nam
         extracted = value_extractor(per_tok[tok_name])
         if isinstance(extracted, tuple):
             val, std = extracted
-            stds.append(std)
         else:
-            val = extracted
-            stds.append(None)
+            val, std = extracted, None
+        # Skip tokenizers with a missing/None metric value (e.g. the
+        # cross-lingual utilization CoV is None for <2-language
+        # tokenizers). A visible omission, not a fabricated 0.0/nan —
+        # consistent with the markdown '---' convention.
+        if val is None:
+            continue
+        stds.append(std)
         values.append(val)
         labels.append(tok_name)
 
@@ -211,8 +224,9 @@ def plot_metric_bar_chart(results: Dict[str, Any], save_path: str, tokenizer_nam
             ax.legend()
 
         metadata = results[metric_key].get('metadata', {})
-        ax.set_ylabel(get_ylabel(metric_key, metadata))
-        ax.set_title(get_plot_title('individual', metric_key))
+        lk = label_metric_key or metric_key
+        ax.set_ylabel(get_ylabel(lk, metadata))
+        ax.set_title(get_plot_title('individual', lk))
         if ylim is not None:
             ax.set_ylim(*ylim)
         plt.xticks(rotation=45)
@@ -235,6 +249,22 @@ def plot_vocabulary_utilization(results: Dict[str, Any], save_path: str, tokeniz
         results, save_path, tokenizer_names, 'vocabulary_utilization',
         lambda td: td['global_utilization'] * 100,
         show_global_lines=show_global_lines, global_avg_fmt='.1f',
+    )
+
+
+def plot_vocab_util_cross_lingual_cov(results: Dict[str, Any], save_path: str, tokenizer_names: List[str], show_global_lines: bool = True):
+    """Plot the cross-lingual coefficient of variation of vocabulary utilization.
+
+    Reads the already-computed ``per_language_cov`` (``None`` for
+    <2-language tokenizers; those bars are skipped by
+    ``plot_metric_bar_chart``).  CoV has no per-tokenizer error, so the
+    extractor returns a bare scalar (no error bars).
+    """
+    plot_metric_bar_chart(
+        results, save_path, tokenizer_names, 'vocabulary_utilization',
+        lambda td: td['per_language_cov'],
+        show_global_lines=show_global_lines, global_avg_fmt='.3f',
+        label_metric_key='vocab_util_cross_lingual_cov',
     )
 
 
@@ -388,60 +418,112 @@ def plot_utf8_integrity(results: Dict[str, Any], save_path: str, tokenizer_names
     save_plot(fig, save_path)
 
 
+# Per-group scalar extractors for grouped plots. Each takes the
+# per-tokenizer dict produced by the metric on a filtered (per-group)
+# data subset and returns a single float for the bar height.
+GROUPED_VALUE_EXTRACTORS = {
+    'fertility': lambda td: td['global']['mean'],
+    'compression_rate': lambda td: td['global']['compression_rate'],
+    'vocabulary_utilization': lambda td: td['global_utilization'] * 100,
+    'tokenizer_fairness_gini': lambda td: td['gini_coefficient'],
+    'bigram_entropy': lambda td: td['global_bigram_entropy'],
+    'morphscore': lambda td: td['summary']['avg_morphscore_recall'],
+}
+
+
 def plot_grouped_analysis(grouped_results: Dict[str, Dict[str, Any]], save_dir: str,
-                         metric_name: str, group_type: str):
-    """Plot grouped analysis results."""
+                         metric_name: str, group_type: str,
+                         value_extractor: Optional[callable] = None,
+                         tokenizer_names: Optional[List[str]] = None):
+    """Plot grouped analysis results.
+
+    Args:
+        value_extractor: Callable ``(tok_data_dict) -> float`` returning the
+            per-group scalar for a tokenizer. Defaults to the entry in
+            ``GROUPED_VALUE_EXTRACTORS`` for ``metric_name``.
+        tokenizer_names: Optional ordered subset of tokenizers to plot. When
+            ``None``, every tokenizer present in the grouped results is shown.
+    """
     if group_type not in grouped_results:
         return
-        
+
+    if value_extractor is None:
+        value_extractor = GROUPED_VALUE_EXTRACTORS.get(metric_name)
+        if value_extractor is None:
+            logger.warning(f"No grouped-plot extractor registered for metric {metric_name}; skipping")
+            return
+
     fig, ax = plt.subplots(figsize=(12, 8))
     group_data = grouped_results[group_type]
-    
+
     # Extract data for plotting
     groups = list(group_data.keys())
-    tokenizer_names = set()
-    
+    discovered = set()
+
     for group_results in group_data.values():
         if metric_name in group_results:
-            tokenizer_names.update(group_results[metric_name]['per_tokenizer'].keys())
-    
-    tokenizer_names = sorted(list(tokenizer_names))
-    
+            discovered.update(group_results[metric_name]['per_tokenizer'].keys())
+
+    if tokenizer_names is not None:
+        # Preserve user-supplied order; drop names absent from results
+        tokenizer_names = [t for t in tokenizer_names if t in discovered]
+    else:
+        tokenizer_names = sorted(discovered)
+
     # Check if we have tokenizers to plot
     if not tokenizer_names:
         logger.warning(f"No tokenizers found for metric {metric_name} in group type {group_type}")
         return
-    
+
     # Plot data
     x_pos = np.arange(len(groups))
     width = 0.8 / len(tokenizer_names)
-    
+
     colors = get_colors(len(tokenizer_names))
     for i, tok_name in enumerate(tokenizer_names):
         values = []
         for group_name in groups:
-            if (metric_name in group_data[group_name] and 
+            if (metric_name in group_data[group_name] and
                 tok_name in group_data[group_name][metric_name]['per_tokenizer']):
-                
                 tok_data = group_data[group_name][metric_name]['per_tokenizer'][tok_name]
-                if 'global' in tok_data:
-                    g = tok_data['global']
-                    values.append(g.get('mean', g.get('compression_rate', 0)))
-                else:
+                try:
+                    values.append(value_extractor(tok_data))
+                except (KeyError, TypeError) as e:
+                    logger.warning(
+                        f"Extractor failed for {metric_name}/{group_name}/{tok_name}: {e}"
+                    )
                     values.append(0)
             else:
                 values.append(0)
-        
+
         ax.bar(x_pos + i * width, values, width, label=tok_name, color=colors[i], alpha=0.8)
     
     xlabel = group_type.replace('_', ' ').title()
-    ylabel = get_metric_display_name(metric_name) 
+    # Pull metadata from the first group that has it so units render correctly
+    metadata = next(
+        (g[metric_name].get('metadata', {})
+         for g in group_data.values() if metric_name in g),
+        {},
+    )
+    ylabel = get_ylabel(metric_name, metadata)
     title = get_plot_title('grouped', metric_name, group_type.replace('_', ' ').title())
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
     ax.set_title(title)
     ax.set_xticks(x_pos + width * (len(tokenizer_names) - 1) / 2)
-    ax.set_xticklabels(groups, rotation=45)
+    # Rotate tick labels when many groups so they don't overlap.
+    tick_rotation = 45 if len(groups) > 5 else 0
+    tick_ha = 'right' if tick_rotation else 'center'
+    # Scale font up for sparse horizontal axes; keep 18 when rotated/dense.
+    if tick_rotation:
+        tick_fontsize = 18
+    elif len(groups) <= 2:
+        tick_fontsize = 28
+    elif len(groups) == 3:
+        tick_fontsize = 24
+    else:
+        tick_fontsize = 20
+    ax.set_xticklabels(groups, rotation=tick_rotation, ha=tick_ha, fontsize=tick_fontsize)
     ax.legend()
     
     save_path = os.path.join(save_dir, f'{group_type}_{metric_name}_individual.png')
@@ -458,6 +540,7 @@ def generate_all_plots(results: Dict[str, Any], save_dir: str, tokenizer_names: 
     # Basic metrics
     plot_fertility(results, os.path.join(save_dir, 'fertility_individual.svg'), tokenizer_names, show_global_lines)
     plot_vocabulary_utilization(results, os.path.join(save_dir, 'vocabulary_utilization_individual.svg'), tokenizer_names, show_global_lines)
+    plot_vocab_util_cross_lingual_cov(results, os.path.join(save_dir, 'vocab_util_cross_lingual_cov_individual.svg'), tokenizer_names, show_global_lines)
 
     # Information theory
     plot_compression_rate(results, os.path.join(save_dir, 'compression_rate_individual.svg'), tokenizer_names, show_global_lines)
@@ -491,7 +574,8 @@ def generate_all_plots(results: Dict[str, Any], save_dir: str, tokenizer_names: 
                 continue
             for metric in ['fertility', 'vocabulary_utilization', 'compression_rate', 'morphscore']:
                 try:
-                    plot_grouped_analysis(grouped_results, grouped_dir, metric, group_type)
+                    plot_grouped_analysis(grouped_results, grouped_dir, metric, group_type,
+                                          tokenizer_names=tokenizer_names)
                 except Exception as e:
                     logger.warning(f"Failed to plot {metric} for group type {group_type}: {e}")
 
@@ -773,7 +857,7 @@ def _plot_faceted_metric(results: Dict[str, Any], save_dir: str,
     cols = min(3, n_tokenizers)
     rows = (n_tokenizers + cols - 1) // cols
     
-    fig, axes = plt.subplots(rows, cols, figsize=(5*cols, 4*rows), sharey=True)
+    fig, axes = plt.subplots(rows, cols, figsize=(5*cols, 3*rows), sharey=True)
     if n_tokenizers == 1:
         axes = [axes]
     elif rows == 1:
@@ -802,7 +886,12 @@ def _plot_faceted_metric(results: Dict[str, Any], save_dir: str,
             
             for lang in languages:
                 lang_data = tok_data['per_language'][lang]
-                if isinstance(lang_data, dict) and 'mean' in lang_data:
+                if metric_name == 'vocabulary_utilization':
+                    # Per-language entry is {'utilization': float, ...};
+                    # render as percentage to match the y-label.
+                    values.append(lang_data.get('utilization', 0.0) * 100
+                                  if isinstance(lang_data, dict) else 0)
+                elif isinstance(lang_data, dict) and 'mean' in lang_data:
                     values.append(lang_data['mean'])
                 elif isinstance(lang_data, dict) and 'bigram_entropy' in lang_data:
                     values.append(lang_data['bigram_entropy'])

@@ -119,6 +119,20 @@ class MarkdownTableGenerator:
                 'lower_is_better': False,
             },
             {
+                # Cross-lingual coefficient of variation of the per-language
+                # vocabulary-utilization ratio (already computed in
+                # basic.py; None for <2-language / mean<=0 tokenizers ->
+                # rendered as the standard '---' placeholder). Lower = more
+                # balanced vocabulary use across languages.
+                'key': 'vocab_util_cross_lingual_cov',
+                'title': 'Vocab Util. CoV',
+                'key_path': ['vocabulary_utilization', 'per_tokenizer'],
+                'value_key': 'per_language_cov',
+                'stat_key': None,
+                'format': '{:.3f}',
+                'lower_is_better': True,
+            },
+            {
                 'key': 'avg_token_rank',
                 'title': 'Avg Token Rank',
                 'key_path': ['unigram_distribution_metrics', 'per_tokenizer'],

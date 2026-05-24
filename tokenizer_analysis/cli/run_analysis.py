@@ -204,6 +204,10 @@ def _slim_tokenizer_entry(metric_name: str, tok_data: dict) -> dict:
             'used_tokens': tok_data.get('global_used_tokens'),
             'vocab_size': tok_data.get('global_vocab_size'),
         }
+        # Cross-language dispersion of the utilization ratio
+        out['per_language_mean'] = tok_data.get('per_language_mean')
+        out['per_language_std'] = tok_data.get('per_language_std')
+        out['per_language_cov'] = tok_data.get('per_language_cov')
         if 'per_language' in tok_data:
             out['per_language'] = tok_data['per_language']
 

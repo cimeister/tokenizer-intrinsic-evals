@@ -499,6 +499,8 @@ Then the **Tokenizer Fairness Gini** with equal weights is
   * $`0`$: perfect parity (every language has identical byte-normalised token cost).
   * $`1`$: maximal unfairness.
 
+- **Cross-Lingual Vocabulary-Utilization CoV** (`vocab_util_cross_lingual_cov`): Coefficient of variation (sample standard deviation ÷ mean, `ddof=1`) of the per-language vocabulary-utilization *ratio* across languages. Computed on the ratio (not the raw used-token count) so it is comparable across tokenizers with different vocabulary sizes. **Lower is better** — a low value means the tokenizer devotes a similarly-sized share of its vocabulary to each language (balanced cross-lingual utilization); a high value means utilization is concentrated in some languages. Complements the Gini coefficient above: Gini measures fairness of per-language *encoding cost*, while this measures balance of per-language *vocabulary coverage*. Requires ≥2 languages with mean utilization > 0; for single-language corpora it is reported as `---` (markdown) / omitted (plot) rather than a fabricated `0`. The JSON results also carry the underlying `per_language_mean` and `per_language_std`. Surfaced in the markdown results table and as an individual comparison plot (`vocab_util_cross_lingual_cov_individual.svg`).
+
 ## Data Format Requirements
 
 The framework supports three input text formats:

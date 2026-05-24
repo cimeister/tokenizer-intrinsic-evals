@@ -7,6 +7,9 @@ from typing import Dict, List, Any, Optional, Tuple
 from collections import defaultdict
 import logging
 import time
+import unicodedata
+
+import numpy as np
 
 from .base import BaseMetrics, TokenizedDataProcessor
 from ..core.input_types import TokenizedData
@@ -17,7 +20,24 @@ from ..utils.text_utils import load_math_data, BUILTIN_MATH_SAMPLES_PATH
 
 logger = logging.getLogger(__name__)
 
-_WS_CHARS = frozenset(' \t\n\r')
+# Whitespace, for whitespace_fidelity.  Definition: ASCII space/tab/newline/
+# carriage-return PLUS every Unicode "space separator" (general category Zs:
+# NBSP U+00A0, thin space U+2009, ideographic space U+3000, ...).  Zero-width
+# *format* characters (category Cf, e.g. ZWSP U+200B) are deliberately NOT
+# whitespace — their loss is captured by exact_match_rate / CER instead, so
+# each loss type lands in the semantically correct measure.  Category-based
+# (not a hardcoded set) so all 17 Zs separators are covered and it is
+# future-proof.  This widened the metric from the historical ASCII-only set;
+# see WHITESPACE_DEFINITION echoed into reconstruction_fidelity metadata.
+_ASCII_WS = frozenset(' \t\n\r')
+WHITESPACE_DEFINITION = "ascii(space,tab,nl,cr)+unicode_Zs"
+
+
+def _is_ws(ch: str) -> bool:
+    """True for ASCII whitespace or any Unicode space separator (Zs)."""
+    return ch in _ASCII_WS or unicodedata.category(ch) == 'Zs'
+
+
 _CER_WARMUP = 50
 
 
@@ -263,37 +283,59 @@ class BasicTokenizationMetrics(BaseMetrics):
             'vocabulary_utilization': {
                 'per_tokenizer': {},
                 'metadata': {
-                    'description': 'Proportion of vocabulary actually used',
-                    'metric_range': '[0.0, 1.0]'
+                    'description': (
+                        'Proportion of vocabulary actually used. '
+                        'per_language_std and per_language_cov measure dispersion '
+                        'of the per-language utilization ratio across languages.'
+                    ),
+                    'metric_range': '[0.0, 1.0]',
+                    'std_ddof': 1,
                 }
             }
         }
-        
+
         for tok_name in self.tokenizer_names:
             if tok_name not in tokenized_data:
                 continue
-            
+
             tok_data = tokenized_data[tok_name]
             vocab_size = self.get_vocab_size(tok_name)
-            
+
             # Compute global utilization
             global_util = self._compute_vocabulary_utilization(tok_data, vocab_size)
-            
+
             # Compute per-language utilization
             per_lang_util = {}
             lang_groups = TokenizedDataProcessor.group_by_language(tok_data)
-            
+
             for language, lang_data in lang_groups.items():
                 lang_util = self._compute_vocabulary_utilization(lang_data, vocab_size)
                 per_lang_util[language] = lang_util
-            
+
+            # Cross-language dispersion of the utilization ratio. Computed on
+            # the ratio (not used_tokens) so it stays comparable across
+            # tokenizers with different vocab sizes.
+            util_ratios = [stats['utilization'] for stats in per_lang_util.values()]
+            n = len(util_ratios)
+            if n >= 2:
+                util_mean = float(np.mean(util_ratios))
+                util_std = float(np.std(util_ratios, ddof=1))
+                util_cov = util_std / util_mean if util_mean > 0 else None
+            else:
+                util_mean = float(util_ratios[0]) if n == 1 else 0.0
+                util_std = 0.0
+                util_cov = None
+
             results['vocabulary_utilization']['per_tokenizer'][tok_name] = {
                 'global_utilization': global_util['utilization'],
                 'global_used_tokens': global_util['used_tokens'],
                 'global_vocab_size': global_util['vocab_size'],
-                'per_language': per_lang_util
+                'per_language': per_lang_util,
+                'per_language_mean': util_mean,
+                'per_language_std': util_std,
+                'per_language_cov': util_cov,
             }
-        
+
         return results
     
     def _compute_vocabulary_utilization(self, tokenized_data: List[TokenizedData], vocab_size: int) -> Dict[str, Any]:
@@ -474,6 +516,16 @@ class BasicTokenizationMetrics(BaseMetrics):
             'reconstruction_fidelity': {
                 'per_tokenizer': {},
                 'summary': {},
+                'metadata': {
+                    'description': 'Encode->decode reconstruction quality: '
+                                   'exact_match_rate, CER, unk_token_rate, '
+                                   'whitespace_fidelity.',
+                    # Self-describing so any result file is traceable: this
+                    # metric was widened from ASCII-only to also count Unicode
+                    # Zs separators (NBSP/thin/ideographic/...).  Pre-change
+                    # whitespace_fidelity numbers are NOT comparable.
+                    'whitespace_definition': WHITESPACE_DEFINITION,
+                },
             }
         }
 
@@ -544,7 +596,7 @@ class BasicTokenizationMetrics(BaseMetrics):
                     if decoded == text:
                         stats['exact_matches'] += 1
                         if not cer_skipped:
-                            ws_total = sum(1 for c in text if c in _WS_CHARS)
+                            ws_total = sum(1 for c in text if _is_ws(c))
                             stats['ws_preserved'] += ws_total
                             stats['ws_total'] += ws_total
                     else:
@@ -623,7 +675,7 @@ class BasicTokenizationMetrics(BaseMetrics):
                 if decoded == text:
                     stats['exact_matches'] += 1
                     if not cer_skipped:
-                        ws_total = sum(1 for c in text if c in _WS_CHARS)
+                        ws_total = sum(1 for c in text if _is_ws(c))
                         stats['ws_preserved'] += ws_total
                         stats['ws_total'] += ws_total
                 else:
@@ -831,7 +883,7 @@ class BasicTokenizationMetrics(BaseMetrics):
 
         Returns ``(num_preserved, num_total_ws)`` in the original.
         """
-        total_ws = sum(1 for c in original if c in _WS_CHARS)
+        total_ws = sum(1 for c in original if _is_ws(c))
         if total_ws == 0:
             return (0, 0)
 
@@ -846,7 +898,7 @@ class BasicTokenizationMetrics(BaseMetrics):
         preserved = 0
         j = 0
         for c in original:
-            if c not in _WS_CHARS:
+            if not _is_ws(c):
                 positions = char_positions.get(c)
                 if positions is not None:
                     idx = bisect_left(positions, j)
