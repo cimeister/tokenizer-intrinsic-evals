@@ -13,11 +13,11 @@ Purpose: choose a tokenizer for a production multilingual LLM. The decision axes
 - **Vocab-util CoV ↓** — coefficient of variation of per-language vocab utilization (lower = each language gets a similarly sized share of the vocabulary).
 - **Gini ↓** — cross-language fairness of byte-normalized token cost: 0 = every language equally cheap to encode, 1 = maximally unfair.
 - **CER ↓** — character error rate of encode→decode round-trip (0 = perfect). Severity companion to *Lossless* below (which measures how *often*, not how *much*).
-- **Boundary-cross ↓** — fraction of tokens that fuse bytes across a UTF-8 character boundary (unrecoverable merges). Concentrates in multi-byte scripts (CJK/Indic/Arabic/emoji); the global value is diluted by ASCII — see the per-language faceted plots.
-- **Operator-isol ↑** — fraction of math operators tokenized standalone (vs glued to operands); near 1.0 = clean operator separation (helps arithmetic).
+- **Boundary-cross ↓** — fraction of tokens that fuse bytes across a UTF-8 character boundary (unrecoverable merges). Concentrates in multi-byte scripts (CJK/Indic/Arabic/emoji). The global average is mostly ASCII, so it sits near 0; see the per-language faceted plots.
+- **Operator-isol ↑** — fraction of math operators tokenized standalone (vs attached to operands); near 1.0 = clean operator separation (helps arithmetic).
 
 **Production safety gates (sanity check):**
-- **Lossless ↑** — exact-match round-trip rate. For **NFC** tokenizers <1.0 is *expected* (NFC canonical-composition rewrites, not corruption — CER stays ~0); no-normalizer tokenizers reach 1.0.
+- **Lossless ↑** — exact-match round-trip rate. For **NFC** tokenizers <1.0 is *expected* (NFC canonical-composition rewrites, not corruption; CER stays ~0); no-normalizer tokenizers reach 1.0.
 - **UNK ↓** — global rate of unknown tokens (0 across all here = good).
 - **Byte coverage** — all 256 byte values round-trip (pass/fail).
 - **Determinism** — encoding is stable/reproducible (same input → same tokens).
@@ -36,17 +36,17 @@ This section explains the tokenizer settings, and for the ablations, why that de
 
 - **Algorithm (plain BPE vs parity-aware BPE vs Unigram LM)** — parity-aware BPE (PA-BPE), via the merge selection criteria, equalizes per-language encoding cost instead of following raw frequency. Ablated to test whether that fairness objective actually beats plain frequency-driven BPE on multilingual balance. UnigramLM is another baseline.
 - **Parity mode (hybrid-window vs base)** — base PA-BPE optimizes the single worst-off language at each step; the *hybrid-window* variant adds a global phase prevents always selecting same language. Ablated because the base variant over-penalized English/European (~40–45%); the question is whether hybrid-window corrects that while still improving multilingual equity.
-- **Punctuation/whitespace capping (capped vs uncapped)** — *capped* bounds runs of punctuation/symbols/whitespace to ≤16 chars during pretokenization. Ablated because *uncapped* BPE merges long decorative runs (`----`, `====`, space runs) into single junk vocabulary tokens that waste slots; capping should remove that failure mode at near-zero cost to real text.
+- **Punctuation/whitespace capping (capped vs uncapped)** — *capped* bounds runs of punctuation/symbols/whitespace to ≤16 chars during pretokenization. Ablated because *uncapped* BPE merges long decorative runs (`----`, `====`, space runs) into single junk vocabulary tokens that waste slots; capping should remove that failure mode with little effect on real text.
 - **Pretokenization family** — the regex that splits raw text into pre-tokens before BPE even runs (glossary below). Ablated because it dictates digit grouping, apostrophe/contraction handling, and CamelCase/script behavior — each of which shifts multilingual fairness and arithmetic friendliness.
 - **Training-data composition** — 30-language-*balanced* vs natural *FineWeb2-full* vs *tuned* (glossary below). Ablated because the corpus the tokenizer is *trained* on decides which languages get allocated  vocabulary.
 - **Parity tuning — European up-weighting (×1.2 vs ×1.1)** — how hard the tuned config favors the European families. **Counter-intuitive lever:** the trainer selects the language with the *minimum* `compression_rate / ratio`, so a *higher* ratio ⇒ more merges ⇒ *more* compression. ×1.2 gently favors the primary English/European clientele (correcting a ~40–45% base penalty); the ×1.1 variant tests whether a lighter bias suffices. *(Registered in the config; numbers appear once that run completes.)*
 - **NFC normalization** — Unicode canonical composition applied before tokenizing. Most candidates use it; reference Apertus and the `noNFC` SuperBPE variant do not (see the *Lossless* caveat in the legend — NFC makes exact-match <1.0 *by design*, not corruption).
-- **SuperBPE base & transition point** — SuperBPE is a two-stage 'superword' tokenizer; we record the **base** it was started from (PA-BPE vs plain BPE) and the stage-1→stage-2 *transition* vocab size (64k/90k). Ablated to see whether superwords help and whether a PA-BPE base carries its fairness into SuperBPE.
+- **SuperBPE base & transition point** — SuperBPE is a two-stage 'superword' tokenizer; we record the **base** it was started from (PA-BPE vs plain BPE) and the stage-1→stage-2 *transition* vocab size (64k/90k). Ablated to see whether superwords help and whether the PA-BPE base keeps its fairness after the SuperBPE stage.
 
 **Training-data compositions** (what the tokenizer was trained on; distinct from the FLORES/FineWeb-Edu corpora it is *evaluated* on):
 
 - **balanced** — the 10 GB tokenizer-training mixture in `tokenizer-lm/configs/data/balanced.json`: 3.5 GB English (FineWeb-Edu), 3.0 GB multilingual (30 FineWeb2 languages), 1.5 GB math (FineMath-4+), 1.5 GB code (StarCoder). The 30 multilingual languages are sized in proportion to how much text each has, so most of the 3.0 GB goes to the high-resource ones (rus_Cyrl ~1.0 GB, tam_Taml ~0.004 GB). "Balanced" refers to the fixed split across domains (English is 35% of the total), not to an equal split across languages. Plain BPE, Unigram, and SuperBPE use this mixture as-is; the PA-BPE variants use the same mixture with a parity config (below).
-- **FineWeb2-full** — the temperature sampled (t = 3) FineWeb2 multilingual distribution (high-resource languages dominate), with parity-aware *family* grouping but no hand-tuning.
+- **FineWeb2-full** — the temperature sampled (t = 3) FineWeb2 multilingual distribution (most of the text is high-resource languages), with parity-aware *family* grouping but no hand-tuning.
 - **FineWeb2-full (tuned)** — FineWeb2-full plus three targeted fixes from the intrinsic-analysis diagnosis: (1) European family ratios ×1.2 to gently favor English/European; (2) drop two data-quality failures (`kas_Deva`, script purity 0.59; `lij_Latn`, 68% duplicate lines); (3) regroup script-mismatched languages (`ydd_Hebr` Hebrew-script; `kas/knc/uzs_Arab` Arabic-script) into the *semitic* group so they share script-appropriate merges. The **EU×1.1** ablation differs only in change (1).
 - **balanced; transition Nk** (SuperBPE) — trained on the balanced mixture; *transition Nk* is the stage-1→stage-2 vocab size at which superword merges begin.
 
@@ -64,12 +64,12 @@ In every preset the math and code groups are heuristically fixed at `ratio` 1.0,
 
 - **gpt2** — original GPT-2 regex: English-centric contractions, **no digit-run cap** (long numbers can merge into one token), no script-awareness.
 - **gpt4 / gpt4o** — case-insensitive contractions + CamelCase (lowercase→uppercase) splitting; **digit runs capped at {1,3}** (numbers split into ≤3-digit chunks). gpt4o is the multilingual o200k-style variant; neither splits on script boundaries.
-- **apertus** — byte-for-byte the Mistral-Nemo scheme (verified from Apertus-70B-2509): no English contraction handling, **single-digit** splitting (each digit its own pre-token — the most arithmetic-friendly), CamelCase splitting. A clean multilingual design.
-- **clean-multi** — same word arms as apertus (single digits, CamelCase) but the leading-character allowance is tightened to *space-only* and the trailing slash/newline tail is dropped, so **apostrophes do NOT attach forward** (`don't` → `don | ' | t`) — avoids baking English contraction shapes into a multilingual vocab.
+- **apertus** — byte-for-byte the Mistral-Nemo scheme (verified from Apertus-70B-2509): no English contraction handling, **single-digit** splitting (each digit its own pre-token, the most arithmetic-friendly), CamelCase splitting.
+- **clean-multi** — same word arms as apertus (single digits, CamelCase) but the leading-character allowance is tightened to *space-only* and the trailing slash/newline tail is dropped, so **apostrophes do NOT attach forward** (`don't` → `don | ' | t`), which keeps English contraction patterns out of the vocabulary.
 - **right-aligned digits** — groups digits right-to-left (Singh & Strouse 2024) so place value stays aligned across token boundaries; aids arithmetic.
-- **capped (suffix on any family)** — punctuation/symbol and whitespace runs are length-bounded to {1,16} (16 keeps `../../` paths and LaTeX markup intact) so BPE cannot mint long decorative-junk tokens; byte-identical to the base regex on normal text/code/math.
+- **capped (suffix on any family)** — punctuation/symbol and whitespace runs are length-bounded to {1,16} (16 keeps `../../` paths and LaTeX markup intact) so BPE cannot build long decorative-junk tokens; byte-identical to the base regex on normal text/code/math.
 
-**Reference matrix** — every tokenizer at a glance (columns map to the dimensions above):
+**Reference matrix** — all tokenizers in one table (columns map to the dimensions above):
 
 | Tokenizer | Type | Algorithm | Base / parity-mode | Pretok | NFC | Capping | Training data |
 |---|---|---|---|---|---|---|---|
