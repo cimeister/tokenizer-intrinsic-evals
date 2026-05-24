@@ -21,6 +21,29 @@ except ImportError:
     MORPHSCORE_AVAILABLE = False
 
 
+# FLORES codes used in this library that have corresponding morphscore CSVs but
+# are absent from MorphScore.FLORES_TO_MS_FILES. Merged into the upstream map
+# at construction time so input-data subsetting works without monkey-patching
+# every call site.
+EXTRA_FLORES_TO_MS_FILES = {
+    'ceb_Latn': 'cebuano_data.csv',
+    'hrv_Latn': 'croatian_data.csv',
+    'isl_Latn': 'icelandic_data.csv',
+    'gle_Latn': 'irish_data.csv',
+    'kaz_Cyrl': 'kazakh_data.csv',
+    'kir_Cyrl': 'kirghiz_data.csv',
+    'lit_Latn': 'lithuanian_data.csv',
+    'lav_Latn': 'latvian_data.csv',  # alt to lvs_Latn
+    'pus_Arab': 'pashto_data.csv',
+    'srp_Cyrl': 'serbian_data.csv',
+    'snd_Arab': 'sindhi_data.csv',
+    'sin_Sinh': 'sinhala_data.csv',
+    'slv_Latn': 'slovenian_data.csv',
+    'wol_Latn': 'wolof_data.csv',
+    'zho_Hant': 'mandarin_data.csv',  # share Mandarin dataset for Hant code
+}
+
+
 class MorphScoreMetrics(BaseMetrics):
     """MorphScore metrics for tokenizer evaluation."""
     
@@ -44,33 +67,62 @@ class MorphScoreMetrics(BaseMetrics):
             exclude_single_tok: Whether to exclude single token words
         """
         super().__init__(input_provider)
-        
+
         if not MORPHSCORE_AVAILABLE:
             raise ImportError("MorphScore library is required for MorphScore metrics")
-        
+
         # Validate that input provider supports tokenizer access
         if not isinstance(input_provider, RawTokenizationProvider):
             raise ValueError("MorphScore metrics require RawTokenizationProvider (tokenizer access)")
-        
+
+        # Merge any additional FLORES → CSV entries into the upstream map so that
+        # subsetting and dataset resolution see the same key space.
+        for k, v in EXTRA_FLORES_TO_MS_FILES.items():
+            MorphScore.FLORES_TO_MS_FILES.setdefault(k, v)
+
         # Store MorphScore configuration
         self.data_dir = data_dir
         self.language_subset = language_subset
         self.by_split = by_split
         self.freq_scale = freq_scale
         self.exclude_single_tok = exclude_single_tok
-        
+
         # Get available languages from input provider
         self.available_languages = input_provider.get_languages()
-        
+
         # Use provided subset or all available languages
         if language_subset is None:
-            self.target_languages = self.available_languages
+            requested_languages = list(self.available_languages)
         else:
-            # Filter to only languages available in the input provider
-            self.target_languages = [lang for lang in language_subset if lang in self.available_languages]
+            requested_languages = [lang for lang in language_subset if lang in self.available_languages]
 
-        self.target_languages = [ISO639_1_to_FLORES.get(lang, lang) for lang in self.target_languages]
-        logger.info(f"MorphScore metrics initialized for {len(self.target_languages)} languages: {self.target_languages}")
+        # Translate any ISO 639-1 codes to FLORES form
+        requested_languages = [ISO639_1_to_FLORES.get(lang, lang) for lang in requested_languages]
+
+        # Restrict to languages with a morphscore dataset (either an explicit
+        # FLORES mapping or a CSV whose stem matches the lowercased FLORES code)
+        ms_keys = set(MorphScore.FLORES_TO_MS_FILES.keys())
+        from pathlib import Path
+        data_root = Path(self.data_dir)
+        self.target_languages = []
+        skipped = []
+        for lang in requested_languages:
+            if lang in ms_keys:
+                self.target_languages.append(lang)
+            elif (data_root / f"{lang.lower()}_data.csv").exists():
+                self.target_languages.append(lang)
+            else:
+                skipped.append(lang)
+
+        if skipped:
+            logger.warning(
+                f"MorphScore: skipping {len(skipped)} language(s) with no morphscore "
+                f"dataset: {skipped}"
+            )
+        logger.info(
+            f"MorphScore metrics initialized for {len(self.target_languages)} "
+            f"language(s): {self.target_languages}"
+        )
     
     def compute(self, tokenized_data: Optional[Dict[str, List[TokenizedData]]] = None) -> Dict[str, Any]:
         """
