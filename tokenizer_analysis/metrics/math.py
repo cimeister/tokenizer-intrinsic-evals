@@ -1143,3 +1143,197 @@ class DigitBoundaryMetrics(BaseMetrics):
                         )
 
             print("\n" + "=" * 60)
+
+    # ------------------------------------------------------------------
+    # Per-text entry point (independent of compute()'s aggregator pipeline)
+    # ------------------------------------------------------------------
+
+    def compute_per_text(
+        self,
+        tokenizer_obj: Any,
+        text: str,
+        char_decode_table: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        """Compute digit boundary alignment metrics for ONE text under ONE
+        tokenizer, returning a per-document summary.
+
+        Mirrors the per-text body inside ``compute()`` but does not pool across
+        a corpus. Used by per-example correlation analysis. The standard
+        ``compute()`` workflow is unaffected; this method snapshots and
+        restores ``self._char_decode_table`` so calling it does not mutate
+        aggregator state.
+
+        Returns a dict with keys: ``n_digit_spans``, ``mean_digit_f1``,
+        ``mean_fertility_per_digit``, ``single_token_number_rate``,
+        ``uniform_chunk_rate``, ``n_operators``, ``operator_isolation_rate``,
+        ``n_compound_operators``, ``compound_operator_preserved_rate``,
+        ``n_tokens`` (the token count produced for the whole text — useful
+        as a regression covariate).
+        NaN is returned for ratios with empty denominators (e.g. no digit
+        spans in the text).
+        """
+        empty = {
+            "n_digit_spans": 0,
+            "mean_digit_f1": float("nan"),
+            "mean_fertility_per_digit": float("nan"),
+            "single_token_number_rate": float("nan"),
+            "uniform_chunk_rate": float("nan"),
+            "n_operators": 0,
+            "operator_isolation_rate": float("nan"),
+            "n_compound_operators": 0,
+            "compound_operator_preserved_rate": float("nan"),
+            "n_tokens": 0,
+            "parse_status": "empty",
+        }
+
+        if not text or not text.strip():
+            return empty
+
+        # Snapshot + restore aggregator state so compute() callers are unaffected.
+        saved_table = getattr(self, "_char_decode_table", None)
+        try:
+            self._char_decode_table = (
+                char_decode_table
+                if char_decode_table is not None
+                else self._build_char_decode_table(tokenizer_obj)
+            )
+
+            # ---- Encode and build char→token map (mirrors compute() body) ----
+            try:
+                try:
+                    token_ids_raw = tokenizer_obj.encode(text, add_special_tokens=False)
+                except TypeError:
+                    token_ids_raw = tokenizer_obj.encode(text)
+            except Exception as e:
+                out = dict(empty)
+                out["parse_status"] = f"encode_error:{type(e).__name__}"
+                return out
+            token_ids = (
+                list(token_ids_raw.ids)
+                if hasattr(token_ids_raw, "ids")
+                else list(token_ids_raw)
+            )
+
+            token_strings = self._convert_ids_to_tokens(tokenizer_obj, token_ids)
+            recon_text, char_to_token = self._build_char_to_token_map(token_strings)
+            source_to_recon = self._build_source_to_recon_map(text, recon_text)
+
+            # Match compute() early-exit semantics: both checks on the original text.
+            has_digits = bool(self._DIGIT_SPAN.search(text))
+            has_operators = bool(self._OPERATOR_SPAN.search(text))
+
+            if not has_digits and not has_operators:
+                out = dict(empty)
+                out["n_tokens"] = len(token_ids)
+                out["parse_status"] = "no_digits_or_operators"
+                return out
+
+            # ---- Per-digit-span scoring ----
+            digit_f1s: List[float] = []
+            digit_fertility: List[float] = []
+            single_token_flags: List[float] = []
+            uniform_chunk_flags: List[float] = []
+
+            if has_digits:
+                for src_start, src_end, digit_str in self._find_number_spans(text):
+                    num_digits = len(digit_str)
+                    if num_digits == 0:
+                        continue
+                    recon_positions = [
+                        source_to_recon[i]
+                        for i in range(src_start, src_end)
+                        if source_to_recon[i] is not None
+                    ]
+                    if len(recon_positions) != num_digits:
+                        continue
+                    span_start = recon_positions[0]
+                    span_end = recon_positions[-1] + 1
+
+                    boundaries = self._get_digit_span_boundaries(
+                        char_to_token, span_start, span_end,
+                    )
+                    if boundaries is None:
+                        continue
+
+                    actual = set(boundaries)
+                    ideal = self._ideal_boundaries(num_digits)
+                    scores = self._score_boundaries(actual, ideal)
+
+                    bnd_list = sorted(boundaries)
+                    chunk_lengths: List[int] = []
+                    prev = 0
+                    for b in bnd_list:
+                        chunk_lengths.append(b - prev)
+                        prev = b
+                    chunk_lengths.append(num_digits - prev)
+                    uniform_chunk = 1.0 if len(set(chunk_lengths)) <= 1 else 0.0
+                    single_token = 1.0 if len(bnd_list) == 0 else 0.0
+                    num_tokens = len(bnd_list) + 1
+                    fertility_per_digit = num_tokens / num_digits
+
+                    digit_f1s.append(scores["f1"])
+                    digit_fertility.append(fertility_per_digit)
+                    single_token_flags.append(single_token)
+                    uniform_chunk_flags.append(uniform_chunk)
+
+            # ---- Per-operator scoring ----
+            isolated_flags: List[float] = []
+            compound_total = 0
+            compound_ok = 0
+
+            if has_operators:
+                token_to_chars: Dict[int, Set[int]] = defaultdict(set)
+                for ci, ti in enumerate(char_to_token):
+                    token_to_chars[ti].add(ci)
+                for m in self._OPERATOR_SPAN.finditer(recon_text):
+                    op_str = m.group()
+                    op_start = m.start()
+                    op_end = m.end()
+                    category = self._OPERATOR_TO_CATEGORY.get(op_str)
+                    if category is None:
+                        continue
+                    op_token_indices: Set[int] = set()
+                    for i in range(op_start, op_end):
+                        if i < len(char_to_token):
+                            op_token_indices.add(char_to_token[i])
+                    if not op_token_indices:
+                        continue
+                    op_char_set = set(range(op_start, op_end))
+                    all_token_chars: Set[int] = set()
+                    for ti in op_token_indices:
+                        all_token_chars |= token_to_chars[ti]
+                    isolated_flags.append(
+                        1.0 if all_token_chars.issubset(op_char_set) else 0.0
+                    )
+                    if len(op_str) > 1:
+                        compound_total += 1
+                        if len(op_token_indices) == 1:
+                            compound_ok += 1
+
+            n_digit_spans = len(digit_f1s)
+            n_operators = len(isolated_flags)
+            return {
+                "n_digit_spans": n_digit_spans,
+                "mean_digit_f1": float(np.mean(digit_f1s)) if n_digit_spans else float("nan"),
+                "mean_fertility_per_digit": (
+                    float(np.mean(digit_fertility)) if n_digit_spans else float("nan")
+                ),
+                "single_token_number_rate": (
+                    float(np.mean(single_token_flags)) if n_digit_spans else float("nan")
+                ),
+                "uniform_chunk_rate": (
+                    float(np.mean(uniform_chunk_flags)) if n_digit_spans else float("nan")
+                ),
+                "n_operators": n_operators,
+                "operator_isolation_rate": (
+                    float(np.mean(isolated_flags)) if n_operators else float("nan")
+                ),
+                "n_compound_operators": compound_total,
+                "compound_operator_preserved_rate": (
+                    (compound_ok / compound_total) if compound_total else float("nan")
+                ),
+                "n_tokens": len(token_ids),
+                "parse_status": "ok",
+            }
+        finally:
+            self._char_decode_table = saved_table

@@ -338,7 +338,9 @@ The slimmed file omits `pairwise_comparisons`, `summary`, `per_category` breakdo
 
 ### Mathematical Content Metrics
 
-Evaluates tokenizer handling of mathematical expressions. Based on Singh & Strouse (2024, [arXiv:2402.14903](https://arxiv.org/abs/2402.14903)), who showed that right-to-left tokenization of numbers improved arithmetic accuracy by >22 percentage points. These metrics run on any text data containing numbers or operators. Disable with `--no-digit-boundary`.
+Evaluates tokenizer handling of mathematical expressions. Based on Singh & Strouse (2024, [arXiv:2402.14903](https://arxiv.org/abs/2402.14903)), who showed that right-to-left tokenization of numbers improved arithmetic accuracy by >22 percentage points. Disable with `--no-digit-boundary`.
+
+> **Data scope:** When `--math-data FILE` or `--use-builtin-math-data` is set — as in the recommended invocation above — these metrics are computed **only on the dedicated math texts**, *not* the general multilingual corpus (the math data replaces the corpus for this metric group). Without either flag they fall back to whatever numbers/operators appear in the main corpus. All per-language results in this group are therefore reported under the synthetic language `math` when dedicated math data is used.
 
 #### Three-Digit Place-Value Boundary Alignment (`three_digit_boundary_f1`)
 
@@ -444,6 +446,8 @@ Counts how many multi-byte characters in the source text have their constituent 
 ### Code Tokenization Metrics
 
 Evaluates tokenizer handling of source code by parsing it with tree-sitter and measuring alignment between AST node boundaries and token boundaries. Install the optional support with `uv sync --extra code-ast`. Supports 19 languages (Python, JavaScript, Java, C, C++, Go, Rust, TypeScript, PHP, Ruby, C#, Scala, Swift, Kotlin, Lua, R, Perl, Haskell, Bash). Configure with `--code-ast-config`; disable with `--no-code-ast`.
+
+> **Data scope:** These metrics are **always** computed on dedicated source-code snippets (loaded via `--code-ast-config`, or small built-in synthetic samples as a fallback) — the general multilingual corpus passed to the analyzer is **never** used for this metric group, regardless of flags.
 
 #### AST Leaf-Node Boundary Alignment (`ast_full_alignment`)
 

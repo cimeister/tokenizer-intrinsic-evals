@@ -1261,3 +1261,221 @@ class ASTBoundaryMetrics(BaseMetrics):
                             )
 
         print("\n" + "=" * 60)
+
+    # ------------------------------------------------------------------
+    # Per-text entry point (independent of compute()'s aggregator pipeline)
+    # ------------------------------------------------------------------
+
+    def compute_per_text(
+        self,
+        tokenizer_obj: Any,
+        source_code: str,
+        language: str = "python",
+        char_decode_table: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        """Compute AST boundary alignment metrics for ONE source-code snippet
+        under ONE tokenizer.
+
+        Reuses ``_parse_snippets`` (tree-sitter via the lightweight worker
+        module) for parsing, then routes ``_check_boundary_alignment_fast``,
+        ``_count_identifier_tokens_fast``, and ``_build_char_to_token_map``
+        at single-snippet granularity. The standard ``compute()`` workflow is
+        unaffected: this method snapshots and restores
+        ``self._char_decode_table`` and does not touch the aggregator state.
+
+        Tree-sitter is invoked **in-process** here (no subprocess). For
+        per-example correlation use, single-snippet calls do not accumulate
+        the heap pressure that motivated the subprocess fence in
+        ``compute()`` — but if a parse fails (timeout, exception, or no
+        matching grammar) all alignment scalars come back NaN with
+        ``n_ast_nodes = 0`` so the caller can drop the row.
+
+        Returns a dict with keys: ``n_ast_nodes`` (total spans considered
+        across all categories), ``full_alignment_rate``,
+        ``start_alignment_rate``, ``end_alignment_rate``, plus per-category
+        rates (``identifier_full_alignment_rate``, etc.),
+        ``identifier_fragmentation_rate`` (fraction of identifiers split
+        into more than one token), ``n_identifiers``, and ``n_tokens``.
+        """
+        from ..loaders.code_data import CodeDataLoader
+
+        empty = {
+            "n_ast_nodes": 0,
+            "full_alignment_rate": float("nan"),
+            "start_alignment_rate": float("nan"),
+            "end_alignment_rate": float("nan"),
+            "identifier_full_alignment_rate": float("nan"),
+            "keyword_full_alignment_rate": float("nan"),
+            "operator_full_alignment_rate": float("nan"),
+            "literal_full_alignment_rate": float("nan"),
+            "delimiter_full_alignment_rate": float("nan"),
+            "identifier_fragmentation_rate": float("nan"),
+            "n_identifiers": 0,
+            "n_tokens": 0,
+            "parse_status": "empty",
+        }
+
+        if not source_code or not source_code.strip():
+            return empty
+
+        # Tree-sitter availability check (cheap if already set).
+        if not self._ensure_treesitter():
+            out = dict(empty)
+            out["parse_status"] = "treesitter_unavailable"
+            return out
+
+        ts_name = CodeDataLoader._LANG_TO_TREESITTER.get(language)
+        if ts_name is None:
+            out = dict(empty)
+            out["parse_status"] = f"no_grammar_for_{language}"
+            return out
+
+        # Parse with tree-sitter via the worker module (in-process, single snippet).
+        try:
+            parsed = _parse_snippets({language: [source_code]}, CodeDataLoader._LANG_TO_TREESITTER)
+        except Exception as e:
+            out = dict(empty)
+            out["parse_status"] = f"parse_error:{type(e).__name__}"
+            logger.debug("compute_per_text parse failed for %s: %s", language, e)
+            return out
+        spans_list = parsed.get(language, [])
+        if not spans_list:
+            out = dict(empty)
+            out["parse_status"] = "parse_empty"
+            return out
+        categorized_spans = spans_list[0]
+        if not any(categorized_spans.get(cat) for cat in self._CATEGORIES):
+            # Parse succeeded but no AST nodes extracted (e.g. comment-only / empty)
+            out = dict(empty)
+            out["parse_status"] = "no_ast_nodes"
+            try:
+                # Still report token count for context.
+                try:
+                    ids_raw = tokenizer_obj.encode(source_code, add_special_tokens=False)
+                except TypeError:
+                    ids_raw = tokenizer_obj.encode(source_code)
+                ids = list(ids_raw.ids) if hasattr(ids_raw, "ids") else list(ids_raw)
+                out["n_tokens"] = len(ids)
+            except Exception:
+                pass
+            return out
+
+        # Byte→char map for span conversion (mirrors compute() body).
+        source_bytes = source_code.encode("utf-8")
+        byte_to_char = self._byte_to_char_offsets(source_bytes)
+
+        char_spans_by_category: Dict[str, List[Tuple[int, int]]] = {}
+        for category, spans in categorized_spans.items():
+            char_spans: List[Tuple[int, int]] = []
+            for byte_start, byte_end in spans:
+                if byte_start >= len(byte_to_char) or byte_end >= len(byte_to_char):
+                    continue
+                char_spans.append((byte_to_char[byte_start], byte_to_char[byte_end]))
+            char_spans_by_category[category] = char_spans
+
+        # Snapshot + restore aggregator state so compute() callers are unaffected.
+        saved_table = getattr(self, "_char_decode_table", None)
+        try:
+            self._char_decode_table = (
+                char_decode_table
+                if char_decode_table is not None
+                else self._build_char_decode_table(tokenizer_obj)
+            )
+
+            # Encode source (with offsets for the indentation path; we don't
+            # use indentation here, but encode_with_offsets is the standard
+            # tokenizer entry point used elsewhere in this class).
+            try:
+                if hasattr(tokenizer_obj, "encode_with_offsets"):
+                    token_ids, _ = tokenizer_obj.encode_with_offsets(source_code)
+                else:
+                    try:
+                        ids_raw = tokenizer_obj.encode(source_code, add_special_tokens=False)
+                    except TypeError:
+                        ids_raw = tokenizer_obj.encode(source_code)
+                    token_ids = list(ids_raw.ids) if hasattr(ids_raw, "ids") else list(ids_raw)
+            except Exception as e:
+                out = dict(empty)
+                out["parse_status"] = f"encode_error:{type(e).__name__}"
+                return out
+
+            if not token_ids:
+                out = dict(empty)
+                out["parse_status"] = "empty_encode"
+                return out
+
+            token_strings = self._convert_ids_to_tokens(tokenizer_obj, token_ids)
+            recon_text, char_to_token = self._build_char_to_token_map(token_strings)
+            if not char_to_token:
+                out = dict(empty)
+                out["parse_status"] = "empty_recon"
+                out["n_tokens"] = len(token_ids)
+                return out
+
+            source_to_recon = self._build_source_to_recon_map(source_code, recon_text)
+
+            s2r_arr = np.array(
+                [x if x is not None else -1 for x in source_to_recon],
+                dtype=np.int64,
+            )
+            c2t_arr = np.array(char_to_token, dtype=np.int64)
+            c2t_len = len(char_to_token)
+
+            # Per-category alignment counters (one record per AST span).
+            per_cat_full: Dict[str, List[float]] = defaultdict(list)
+            per_cat_start: Dict[str, List[float]] = defaultdict(list)
+            per_cat_end: Dict[str, List[float]] = defaultdict(list)
+
+            n_idents = 0
+            n_idents_fragmented = 0
+
+            for category, char_spans in char_spans_by_category.items():
+                for c_start, c_end in char_spans:
+                    alignment = self._check_boundary_alignment_fast(
+                        c_start, c_end, s2r_arr, c2t_arr, c2t_len
+                    )
+                    if alignment is None:
+                        alignment = {
+                            "start_aligned": False,
+                            "end_aligned": False,
+                            "fully_aligned": False,
+                            "cross_boundary": True,
+                        }
+                    per_cat_full[category].append(1.0 if alignment["fully_aligned"] else 0.0)
+                    per_cat_start[category].append(1.0 if alignment["start_aligned"] else 0.0)
+                    per_cat_end[category].append(1.0 if alignment["end_aligned"] else 0.0)
+
+                    if category == "identifier":
+                        n_idents += 1
+                        n_tok = self._count_identifier_tokens_fast(
+                            c_start, c_end, s2r_arr, c2t_arr, c2t_len
+                        )
+                        if n_tok is None or n_tok > 1:
+                            n_idents_fragmented += 1
+
+            # Aggregate
+            all_full = [v for vals in per_cat_full.values() for v in vals]
+            all_start = [v for vals in per_cat_start.values() for v in vals]
+            all_end = [v for vals in per_cat_end.values() for v in vals]
+            n_total = len(all_full)
+
+            def _rate(values: List[float]) -> float:
+                return float(np.mean(values)) if values else float("nan")
+
+            result: Dict[str, Any] = {
+                "n_ast_nodes": n_total,
+                "full_alignment_rate": _rate(all_full),
+                "start_alignment_rate": _rate(all_start),
+                "end_alignment_rate": _rate(all_end),
+                "n_identifiers": n_idents,
+                "identifier_fragmentation_rate": (
+                    (n_idents_fragmented / n_idents) if n_idents else float("nan")
+                ),
+                "n_tokens": len(token_ids),
+                "parse_status": "ok",
+            }
+            for cat in self._CATEGORIES:
+                result[f"{cat}_full_alignment_rate"] = _rate(per_cat_full.get(cat, []))
+            return result
+        finally:
+            self._char_decode_table = saved_table
