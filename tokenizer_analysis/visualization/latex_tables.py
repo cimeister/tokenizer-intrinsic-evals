@@ -52,7 +52,7 @@ class LaTeXTableGenerator:
                 'multiplier': 100. #Turn into percentage but with escaped % for LaTeX
             },
             'type_token_ratio': {
-                'title': 'Type-Token Ratio',
+                'title': 'TTR',
                 'key_path': ['type_token_ratio', 'per_tokenizer'],
                 'value_key': 'global_ttr',
                 'stat_key': None,
@@ -61,7 +61,7 @@ class LaTeXTableGenerator:
                 'lower_is_better': False
             },
             'renyi_1.0': {
-                'title': 'Rényi Entropy ($\\alpha$=1)',
+                'title': 'Rényi ($\\alpha$=1)',
                 'key_path': ['renyi_efficiency', 'per_tokenizer'],
                 'value_key': 'renyi_1.0',
                 'stat_key': 'overall',
@@ -70,7 +70,7 @@ class LaTeXTableGenerator:
                 'lower_is_better': False
             },
             'renyi_2.5': {
-                'title': 'Rényi Entropy ($\\alpha$=2.5)',
+                'title': 'Rényi ($\\alpha$=2.5)',
                 'key_path': ['renyi_efficiency', 'per_tokenizer'],
                 'value_key':  'renyi_2.5',
                 'stat_key': 'overall',
@@ -79,7 +79,7 @@ class LaTeXTableGenerator:
                 'lower_is_better': False
             },
             'tokenizer_fairness_gini': {
-                'title': 'Gini Coefficient',
+                'title': 'Gini',
                 'key_path': ['tokenizer_fairness_gini', 'per_tokenizer'],
                 'value_key': 'gini_coefficient',
                 'stat_key': None,
@@ -142,7 +142,7 @@ class LaTeXTableGenerator:
                 'lower_is_better': False
             },
             'compression_rate': {
-                'title': 'Compression Rate',
+                'title': 'Comp. Rate',
                 'key_path': ['compression_rate', 'per_tokenizer'],
                 'value_key': 'global',
                 'stat_key': 'compression_rate',
@@ -310,7 +310,16 @@ class LaTeXTableGenerator:
             LaTeX table string
         """
         if metrics is None:
-            metrics = ['fertility', 'vocabulary_utilization', 'type_token_ratio', 'token_length', 'avg_tokens_per_line']
+            metrics = [
+                'compression_rate',
+                'type_token_ratio',
+                'vocabulary_utilization',
+                'fertility',
+                'renyi_2.5',
+                'tokenizer_fairness_gini',
+                'morphscore_precision',
+                'morphscore_recall',
+            ]
         
         # Validate metrics
         valid_metrics = [m for m in metrics if m in self.metric_configs]
@@ -322,12 +331,21 @@ class LaTeXTableGenerator:
         num_cols = len(valid_metrics) + 1  # +1 for tokenizer name column
         col_spec = "l" + "c" * len(valid_metrics)
         
-        # Create header with wrapped titles
+        # Create header with wrapped titles + a direction-of-goodness arrow
+        # ($\downarrow$ when lower is better, $\uparrow$ otherwise). We append
+        # the arrow after wrapping so it always appears on the last line of a
+        # multi-line header.
         header_titles = []
         for m in valid_metrics:
-            title = self.metric_configs[m]['title']
-            wrapped_title = self._wrap_column_title(title)
-            header_titles.append(wrapped_title)
+            cfg = self.metric_configs[m]
+            arrow = "$\\downarrow$" if cfg.get('lower_is_better') else "$\\uparrow$"
+            wrapped_title = self._wrap_column_title(cfg['title'])
+            if wrapped_title.startswith("\\makecell{") and wrapped_title.endswith("}"):
+                # Append the arrow inside the last makecell line.
+                inner = wrapped_title[len("\\makecell{"):-1]
+                header_titles.append(f"\\makecell{{{inner} \\\\ ({arrow})}}")
+            else:
+                header_titles.append(f"\\makecell{{{wrapped_title} \\\\ ({arrow})}}")
         
         table_lines = [
             "% Requires \\usepackage{makecell} in preamble",
