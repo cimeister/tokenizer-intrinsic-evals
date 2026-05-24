@@ -43,6 +43,7 @@ Repository = "https://github.com/sanderland/tokenizer-intrinsic-evals"
 tokenizer-analysis = "tokenizer_analysis.cli.run_analysis:main"
 tokenizer-visualize = "tokenizer_analysis.cli.visualize_tokenization:main"
 update-remote = "tokenizer_analysis.cli.update_remote:main"
+tokenizer-sanity-check = "tokenizer_analysis.cli.sanity_check:main"
 
 [project.optional-dependencies]
 code-ast = [

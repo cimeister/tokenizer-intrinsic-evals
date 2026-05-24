@@ -86,3 +86,39 @@ MAX_MORPHEME_OVERLAP = 1.0
 PUNCTUATION = '.,!?;:"()[]{}'
 
 UNK_CANDIDATES = ['<unk>', '[UNK]', '<UNK>', 'unk', 'UNK', '\u2047', '<|endoftext|>']
+
+
+# --- Tokenizer Sanity Check ---
+# Pass/warn/fail thresholds for the single-tokenizer sanity-check diagnostic
+# (tokenizer_analysis/diagnostics/sanity_check.py). Every value here is echoed
+# verbatim into the report's metadata.thresholds so results stay traceable.
+
+# C1: a byte-level tokenizer must represent all 256 byte values.
+SANITY_BYTE_COVERAGE_REQUIRED = 256
+# C1: >0 bytes that are in vocab but fail behavioral roundtrip -> warn.
+SANITY_MAX_UNREPRESENTABLE_BYTES_WARN = 0
+# C2: fraction of vocab tokens that begin with a combining mark.
+SANITY_MARK_LEADING_TOKEN_WARN_FRAC = 0.005
+SANITY_MARK_LEADING_TOKEN_FAIL_FRAC = 0.02
+# C16: count of vocab tokens the tokenizer's own normalizer can never emit.
+SANITY_VOCAB_UNREACHABLE_FAIL_COUNT = 0
+# C3: on the curated probe set every probe must be clean or lossy_expected.
+SANITY_ROUNDTRIP_CLEAN_PASS_FRAC = 1.0
+# C3: any red-flag bug -> at least warn; >= fail frac -> fail.
+SANITY_ROUNDTRIP_BUG_WARN_FRAC = 0.0
+SANITY_ROUNDTRIP_BUG_FAIL_FRAC = 0.01
+# C5: whitespace fidelity below this -> WARN (C5 is warn-only by design;
+# WordPiece/SentencePiece are intentionally whitespace-lossy).
+SANITY_WHITESPACE_FIDELITY_PASS_FRAC = 1.0
+# C6: digit chunking consistency = 1 - normalized boundary-pattern entropy.
+SANITY_DIGIT_CONSISTENCY_PASS = 0.99
+# C6: documents the entropy normalization basis (string, not a numeric magic value).
+SANITY_DIGIT_ENTROPY_NORM = "log2(distinct_patterns)"
+# C13: per-script UNK rate above which a script is flagged undertrained.
+SANITY_UNK_SCRIPT_WARN_RATE = 0.01
+# C10: pretokenizer must conserve at least this fraction of input characters.
+SANITY_PRETOK_CONSERVATION_FAIL_FRAC = 0.999
+# C15: cleaned single-token length above which a token is flagged as an outlier.
+SANITY_MAX_REASONABLE_TOKEN_CHARS = 64
+# Default cap on FLORES texts per language when --use-sample-data is passed.
+SANITY_PROBE_SAMPLES_PER_LANG = 50
