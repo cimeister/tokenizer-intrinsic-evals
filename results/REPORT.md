@@ -59,19 +59,20 @@ Full definitions in *Methods and metrics*.
 - **Gini** — cross-language inequality of per-language token cost; lower = more equal.
 - **vocab-util CoV** — cross-language variation in vocabulary use; lower = more even.
 - **Eng B/tok** — FineWeb-Edu English bytes per token; higher = more compression.
-- **Val BPB / FLORES BPB** — downstream LM bits per byte; lower = better.
+- **Val BPB / FLORES BPB** — downstream LM bits per byte; lower = better. The headline FLORES BPB is the macro-mean over the 31 training languages; the full 214-language macro is in the appendix.
 - **MC-math / MBPP** — downstream math and code scores; higher = better.
 - **gate** — production-safety verdict (pass/warn/fail); fail disqualifies.
 
 ## Candidate comparison
 
-The intrinsic columns are computed on the broad FLORES set. Val BPB, FLORES BPB, MC-math, and MBPP come from the downstream language models. `pending` means not yet measured, and `—` means not run.
+The recommended tokenizers and the current Apertus production baseline, on the decision metrics. The intrinsic columns are computed on the broad FLORES set. Val BPB, FLORES BPB, MC-math, and MBPP come from the downstream language models. FLORES BPB here is the macro-mean over the 31 FLORES languages in the LM training set; the full 214-language macro is in the appendix. The Apertus baseline has a standard (10B balanced) run but no math+code run, so its MC-math and MBPP are blank. `pending` means not yet measured, and `—` means not run.
 
-| Tokenizer | Role | Multiling. sent/tok ↑ | Gini ↓ | Vocab-util CoV ↓ | Eng B/tok ↑ | Vocab util ↑ | Val BPB ↓ | FLORES BPB ↓ | MC-math ↑ | MBPP ↑ [95% CI] | Gate |
+| Tokenizer | Role | Multiling. sent/tok ↑ | Gini ↓ | Vocab-util CoV ↓ | Eng B/tok ↑ | Vocab util ↑ | Val BPB ↓ | FLORES BPB (trained) ↓ | MC-math ↑ | MBPP ↑ [95% CI] | Gate |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| PA-Clean-capped | default | 0.0232 | 0.081 | 0.4138 | 4.24 | 0.605 | 0.729 | 2.965 | 0.295 | 0.190 [0.158, 0.224] | warn |
-| PA-Apertus-capped | conditional | 0.0233 | 0.081 | 0.4130 | 4.34 | 0.606 | 0.729 | 2.943 | 0.270 | 0.058 [0.038, 0.080] | warn |
+| PA-Clean-capped | default | 0.0232 | 0.081 | 0.4138 | 4.24 | 0.605 | 0.729 | 1.169 | 0.295 | 0.190 [0.158, 0.224] | warn |
+| PA-Apertus-capped | conditional | 0.0233 | 0.081 | 0.4130 | 4.34 | 0.606 | 0.729 | 1.170 | 0.270 | 0.058 [0.038, 0.080] | warn |
 | SuperBPE·clean-cap·hw·fw2full·t90k/128k | provisional | 0.0227 | 0.106 | 0.4892 | 5.01 | 0.550 | pending | pending | 0.268 | 0.196 [0.162, 0.232] | warn |
+| Apertus | baseline | 0.0198 | 0.205 | 0.5133 | 4.60 | 0.561 | 0.720 | 1.168 | — | — | warn |
 
 `warn` is advisory: for NFC tokenizers exact-match below 1.0 is canonical re-spelling, not loss. MBPP has a paired-bootstrap 95% CI; MC-math is a single run.
 
@@ -155,7 +156,7 @@ At matched capped settings, parity-aware BPE has a Gini of 0.081 against 0.114 f
 | Tokenizer | Val BPB ↓ | FLORES BPB ↓ | Code BPB ↓ | MC-math ↑ | MBPP ↑ [95% CI] |
 |---|---|---|---|---|---|
 | PA-Clean-capped [matched] | 0.729 | 2.965 | 0.533 | 0.295 | 0.190 [0.158, 0.224] |
-| BPE-Clean-uncapped [matched] | 0.716 | pending | pending | 0.270 | pending |
+| BPE-Clean-uncapped [matched] | 0.716 | 2.654 | 0.523 | 0.270 | pending |
 
 *[proxy] tokenizer-lm 1B-balanced Δ, factor: Trainer (BPE vs PA-BPE)* (Δ = B−A; BPB Δ<0 means B better; **bold** = p_adj<0.05):
 | A | B | ΔVal | ΔFLORES (tr.) | ΔFLORES (all) | ΔBLiMP | ΔCode |
@@ -847,11 +848,12 @@ Small transformers trained from scratch on each tokenizer (companion `tokenizer-
 **Full per-tokenizer results** (point estimates; `[matched]`/`[proxy]`/`pending`/`—` as in the ablations; MBPP/GSM8K/HumanEval 95% CIs in `bootstrap_mathcode_significance.json`, MBPP CI shown with the ablations). **BLiMP is Option-B (BOS / empty-context) scoring for all rows.** The main eval files mix Option-A and Option-B, which are not comparable, so only Option-B is reported; `optA-only` flags a run that has no Option-B eval (its Option-A value is omitted, not substituted):
 | Tokenizer | Val BPB ↓ | FLORES all ↓ | FLORES tr ↓ | Code BPB ↓ | BLiMP ↑ | MultiBLiMP ↑ | MGSM ↑ | MC-math ↑ | GSM8K ↑ | HumanEval ↑ | MBPP ↑ |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| PA-Apertus-capped [matched] | 0.729 | 2.943 | 1.170 | 0.531 | 0.819 | pending | pending | 0.270 | 0.240 | 0.049 | 0.058 |
-| PA-Clean-capped [matched] | 0.729 | 2.965 | 1.169 | 0.533 | 0.816 | pending | 0.013 | 0.295 | 0.232 | 0.055 | 0.190 |
+| PA-Apertus-capped [matched] | 0.729 | 2.943 | 1.170 | 0.531 | 0.819 | 0.916 | pending | 0.270 | 0.240 | 0.049 | 0.058 |
+| PA-Clean-capped [matched] | 0.729 | 2.965 | 1.169 | 0.533 | 0.816 | 0.919 | 0.013 | 0.295 | 0.232 | 0.055 | 0.190 |
 | SuperBPE·apertus-cap·hw·fw2full [matched] | 0.733 | 3.081 | 1.176 | 0.541 | 0.815 | 0.912 | 0.011 | 0.269 | 0.198 | 0.055 | 0.004 |
 | SuperBPE·clean-cap·hw·fw2full·t90k/128k [matched] | pending | pending | pending | pending | pending | pending | pending | 0.268 | 0.222 | 0.073 | 0.196 |
-| BPE-Clean-uncapped [matched] | 0.716 | pending | pending | pending | 0.821 | 0.910 | pending | 0.270 | 0.216 | 0.018 | 0.148 |
+| Apertus [matched] | 0.720 | 2.768 | 1.168 | 0.526 | 0.819 | 0.914 | 0.012 | — | — | — | — |
+| BPE-Clean-uncapped [matched] | 0.716 | 2.654 | 1.157 | 0.523 | 0.821 | 0.910 | pending | 0.270 | 0.216 | 0.018 | 0.148 |
 | BPE-gpt2 [matched] | 0.713 | 2.640 | 1.157 | 0.515 | 0.816 | 0.909 | 0.012 | — | — | — | — |
 | BPE-rightalign [matched] | 0.712 | 2.644 | 1.160 | 0.519 | 0.816 | 0.912 | 0.012 | pending | pending | pending | pending |
 | PA-Clean-uncapped [matched] | 0.728 | 2.966 | 1.167 | 0.529 | 0.818 | 0.917 | 0.009 | — | — | — | — |
