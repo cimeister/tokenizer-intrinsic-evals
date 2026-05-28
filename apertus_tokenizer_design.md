@@ -1,5 +1,21 @@
 # Pretokenization: design choices
 
+> **Current direction (what the report's candidates use): the `clean-multi` pretokenizer (capped),
+> with a reduced SuperBPE stage-2 regex.** `clean-multi` resolves the decisions below in their
+> multilingual-safe form — case-splitting **on**, single-digit `\p{N}`, **no** trailing-char fusion
+> (Decision 3 Option C), `\p{M}` included in word patterns — and adds two things the apertus reference
+> regex does not:
+> 1. a **space-only word prefix** (`[ ]?` instead of `[^\r\n\p{L}\p{N}]?`), so leading punctuation and
+>    apostrophes do **not** attach forward: `don't` → `don | ' | t`, keeping English contraction
+>    patterns out of the multilingual vocabulary;
+> 2. **length-capped** punctuation/whitespace runs (`{1,16}`), so BPE cannot build long
+>    decorative-junk tokens (`----`, `====`, space runs) — byte-identical to the uncapped form on
+>    normal text/code/math.
+>
+> The exact stage-1 and stage-2 patterns are in
+> [clean-multi regex (current direction)](#clean-multi-regex-current-direction) at the end. The
+> apertus-specific regex and added-token material below is retained as the comparison reference.
+
 ## Background: what pretokenization is and why it matters 
 
 **Pretokenization** is a preprocessing step that happens *before* tokenizer training (and before text encoding at inference time). It splits raw text into coarse chunks called **pre-tokens** using a regex. Tokenization algorithms (including BPE) then operate independently within each pre-token, e.g., BPE merges can never cross pre-token boundaries. In short, this is the mechanism that controls what can become a token.
@@ -149,9 +165,22 @@ getHTTPResponse → getHTTPResponse
 - Grouped splitting introduces arbitrary boundaries: `2025` → `202` | `5`, `123456` → `123` | `456`. These don't correspond to meaningful structure in the number. BPE can't reassemble across the group boundary.
 - Single-digit is simpler, deterministic, and spends zero merge budget on digits. But it means the model must always process numbers digit-by-digit, which is inefficient for code and math where multi-digit constants are frequent.
 
-**Current choice:** use `\p{N}` in stage 1. If using SuperBPE, upgrade to allow 3 digit tokens in stage 2.
+**Conflicting external evidence.** Whether grouped (`\p{N}{1,3}`, optionally right-to-left) beats
+single-digit is genuinely unsettled in the literature:
+- <https://arxiv.org/abs/2402.14903>
+- <https://huggingface.co/spaces/huggingface/number-tokenization-blog>
 
-Stage 1 with `\p{N}` gives a clean baseline: zero merge budget spent on digits, all merges dedicated to learning language structure. Because single-digit pre-tokens contain no internal merges, switching to `\p{N}{1,3}` in stage 2 is guaranteed safe — it only *merges* adjacent stage 1 pre-tokens (combining `7` | `6` | `8` into `768`), never *splits* them. Stage 2 can then learn multi-digit tokens within the superword vocabulary.
+These point in different directions on which digit scheme is best for arithmetic, so this is not a
+solved question.
+
+**Current choice:** use `\p{N}` (single digit) in stage 1, and the deployed `clean-multi` SuperBPE
+stage-2 regex **keeps `\p{N}` (single digit) in stage 2 as well** — the multi-digit upgrade is *not*
+applied in the shipped clean-multi tokenizers. **We stick with single-digit tokenization to match how
+the Apertus math pipeline has been optimized** (the downstream math training/eval setup assumes
+digit-by-digit numbers). Given the conflicting evidence above, **this is a decision that is up for
+discussion** — not a settled best practice.
+
+Stage 1 with `\p{N}` gives a clean baseline: zero merge budget spent on digits, all merges dedicated to learning language structure. Because single-digit pre-tokens contain no internal merges, switching to `\p{N}{1,3}` in stage 2 would be guaranteed safe — it only *merges* adjacent stage 1 pre-tokens (combining `7` | `6` | `8` into `768`), never *splits* them. Stage 2 could then learn multi-digit tokens within the superword vocabulary; the shipped clean-multi stage-2 does not currently take this option.
 
 ### Decision 3: Punctuation trailing characters
 
@@ -198,6 +227,42 @@ x = 1\n (no punct before) → ... | \n (A/B/C: newline is separate anyway)
 ```
 
 
+### Decision 3b: Punctuation / whitespace run length (capping)
+
+**Should runs of punctuation/symbols and runs of whitespace be allowed to grow without bound, or
+capped at a fixed length?**
+
+The punctuation pattern (` ?[^\s\p{L}\p{N}]+`) and the whitespace patterns (`\s+`, `\s*[\r\n]+`) use a
+`+` quantifier by default, so a run of any length is a single pre-token. BPE can then learn the *whole
+run* as one token.
+
+**Option A — uncapped (`+`, GPT-4 / Apertus reference):** a run of any length is one pre-token.
+
+```
+----------------------------------------   → one pre-token  (can become one "----…" token)
+========                                   → one pre-token
+"        " (long space run)                → one pre-token
+```
+
+**Option B — capped (`{1,16}`, clean-multi current):** any punctuation/symbol or whitespace run is
+bounded to 16 characters per pre-token; longer runs are split into ≤16-char pieces.
+
+**Trade-offs:**
+- Uncapped lets BPE spend vocabulary slots on long **decorative-junk** tokens — `----`, `====`,
+  `####`, long space runs, separator bars — which appear in scraped/markdown data and waste slots that
+  could go to language content. These tokens are almost never useful at inference.
+- Capping at 16 removes that failure mode: no run-token can exceed 16 chars, so BPE cannot build a
+  64-char rule of dashes. The cap is **byte-identical to uncapped on normal text/code/math** (real runs
+  of punctuation or indentation are short); it only bites on pathological decorative runs.
+- 16 (rather than a smaller cap) is chosen so common legitimate runs stay intact: `../../../` path
+  segments, `***` / `---` markdown, LaTeX markup like `\\\\`, and up-to-16-space indentation are
+  unaffected.
+
+**Current choice:** Option B — cap every punctuation/symbol and whitespace quantifier at `{1,16}`
+(`[^\s\p{L}\p{N}]{1,16}`, `\s{1,16}`, `\s{0,16}[\r\n]{1,16}`). This is exactly the difference between
+the report's "capped" and "uncapped" tokenizer variants; the capped form is the current direction. The
+uncapped clean variant is otherwise identical (the caps revert to `+`).
+
 ### Decision 4: SuperBPE stage 2 reduced regex
 
 **If using SuperBPE, what should the stage 2 regex look like?**
@@ -220,9 +285,53 @@ Starting from the base pretokenization described above, here are the independent
 
 These are independent and combinable. 
 
-**Current choice:** This is something to be experimented with still. The standard choice is config 4: remove words, punct to `{2,}`. That gives word superwords while keeping operators and line structure isolated. 
+**Current choice (deployed `clean-multi` stage-2):** **remove the word patterns** (words become gap
+text, so cross-word superwords like `theĠcat`, `defĠmain` can form), **keep single-character
+punctuation isolated** (` ?(?:[^\s\p{L}\p{N}\p{M}]\p{M}*){1,16}` — a punct char plus its combining
+marks, capped at 16; so operators `(`, `):`, `<=` stay separated and don't fuse into code superwords),
+**keep single digits** `\p{N}` (no `{1,3}` upgrade), and **keep `\s*[\r\n]+` and trailing-whitespace
+`\s+(?!\S)`** so line and indentation structure stay intact. Trailing whitespace is *not* removed, so
+superwords do not span indentation or line breaks. This is more conservative than the "config 4 / punct
+`{2,}`" option discussed above (which would let single punctuation fuse into superwords): the shipped
+clean-multi keeps punctuation fully isolated, limiting superwords to natural-language word sequences.
+Further loosening (removing trailing whitespace / newlines, or the digit upgrade) remains to be
+experimented with.
 
+### Decision 4b: Operator / punctuation separation (clean-multi vs apertus)
 
+**Should operators and punctuation be kept as isolated pre-tokens, or allowed to fuse with adjacent
+text into larger tokens (especially superwords)?**
+
+This is mostly a *stage-2* question, and it is the sharpest practical difference between the
+`clean-multi` and `apertus` directions for **code**. Both stages split punctuation from letters via the
+punctuation pattern; the question is how aggressively stage 2 lets that boundary dissolve.
+
+- **clean-multi keeps operators/punctuation isolated.** Two things enforce this. (1) The **space-only
+  word prefix** `[ ]?` (Decision 1/3) means a leading operator never attaches to the following word in
+  stage 1 — `=` in ` = x` stays its own pre-token, and an apostrophe never joins a word (`don't` →
+  `don | ' | t`). (2) The **stage-2 punctuation pattern keeps single punctuation isolated**
+  (` ?(?:[^\s\p{L}\p{N}\p{M}]\p{M}*){1,16}`, i.e. each punct char is its own unit), so superwords form
+  only across *word* gaps, not across operators. Result: `def main():` stays
+  `def | main | ( | ) | :` (with word superwords forming among the letter runs), and operators like
+  ` = `, ` + `, `) * `, `] =`, `<div class` do **not** fuse into single tokens.
+
+- **apertus (and gpt4) let operators/markup fuse.** The apertus reference uses a non-space word prefix
+  `[^\r\n\p{L}\p{N}]?`, so a leading operator/space attaches forward, and its stage-2 is more permissive
+  about punctuation; under SuperBPE this lets operators and markup merge into code-spanning superwords
+  (` = `, ` + `, `) * `, `<div class`, `] =`). Empirically this is a real downstream cost: in the
+  report's SuperBPE-vs-base analysis, apertus/gpt4 SuperBPE put ~19–21% of code-sample tokens into
+  added superwords versus ~5% for clean-multi, and the apertus-pretok models show a **reproducible MBPP
+  code-generation regression** (apertus ≪ clean). Keeping operators isolated is why `clean-multi` is the
+  most code-safe option in the set.
+
+**Trade-offs:** fusing operators can shorten code slightly (fewer tokens for common operator+space
+patterns) and is harmless for pure compression, but it concentrates code structure into a few
+superword tokens that the model then has to emit exactly — the failure mode behind the apertus MBPP
+regression. Keeping them isolated costs a little code compression but preserves robust, position-stable
+operator/line structure.
+
+**Current choice:** keep operators/punctuation isolated (clean-multi). Operators and single punctuation
+are never fused; superwords are limited to natural-language word sequences.
 
 ### (Non-)Decision 5: Inclusion of combining marks (\p{M}) in the word pattern
 There's not much need to think about this decision in our context... we should include this to enable better multilingual support. Many scripts use Unicode combining marks (\p{M}) as integral parts of words: vowel signs, virama/halant, tone marks, and diacritics. These characters are not \p{L} (letters). A word pattern that only matches \p{L}+ breaks at every combining mark, fragmenting words in Indic scripts, Thai, Bengali, Tamil, and diacritical Arabic. Some tokenizers get away with this design choice (e.g., Qwen 3), but I don't really see what advantages it brings.
@@ -230,12 +339,17 @@ There's not much need to think about this decision in our context... we should i
 
 ## Summary of reference tokenizer choices
 
-| Decision | GPT-4 | Apertus (current) | Qwen 3 |
-|----------|-------|-------------------|------|
-| `\p{M}` in word pattern | Yes | Yes | **No** (breaks Indic, Thai, Arabic) |
-| Case splitting | Yes | Yes | No |
-| Digit grouping | `\p{N}{1,3}` | `\p{N}` | `\p{N}` |
-| Punct trailing | `[\r\n/]*` | `[\r\n/]*` | `[\r\n]*` |
+| Decision | GPT-4 | Apertus (ref.) | Qwen 3 | **clean-multi (current direction)** |
+|----------|-------|-------------------|------|------|
+| `\p{M}` in word pattern | Yes | Yes | **No** (breaks Indic, Thai, Arabic) | **Yes** |
+| Case splitting | Yes | Yes | No | **Yes** |
+| Digit grouping | `\p{N}{1,3}` | `\p{N}` | `\p{N}` | **`\p{N}` (both stages)** |
+| Punct trailing | `[\r\n/]*` | `[\r\n/]*` | `[\r\n]*` | **none (Option C)** |
+
+Beyond the four decisions above, `clean-multi` differs from the apertus reference in two further
+respects (see the callout at the top and the regex blocks below): a **space-only word prefix** `[ ]?`
+(the apertus/GPT-4 reference allows a non-space leading char, so apostrophes attach forward there) and
+**`{1,16}` length caps** on punctuation/whitespace runs (the references are uncapped).
 
 ### New Apertus Regex
 
@@ -257,6 +371,43 @@ There's not much need to think about this decision in our context... we should i
 |\s*[\r\n]+                                                                         newline boundary
 |\s+(?!\S)                                                                          trailing whitespace
 ```
+
+## clean-multi regex (current direction)
+
+The patterns below are taken verbatim from the shipped `clean-multi` (capped) tokenizers used by the
+report's candidates (`PA-Clean-capped`, `SuperBPE-clean-fw2full-hw`). They are the concrete form of the
+decisions above: case-splitting on, single-digit `\p{N}`, no trailing-char fusion, `\p{M}` in the word
+arms — plus the **space-only word prefix** `[ ]?` (apostrophes/punctuation do not attach forward) and
+the **`{1,16}` caps** on punctuation/whitespace runs.
+
+### clean-multi stage 1
+
+```
+[ ]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}]*[\p{Ll}\p{Lm}\p{Lo}\p{M}]+    word (ends lowercase), space-only prefix
+|[ ]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}]+[\p{Ll}\p{Lm}\p{Lo}\p{M}]*   word (starts uppercase), space-only prefix
+|\p{N}                                                            single digit
+| ?[^\s\p{L}\p{N}]{1,16}                                          punctuation run, no trailing chars, capped at 16
+|\s{0,16}[\r\n]{1,16}                                             newline boundary (capped)
+|\s{1,16}(?!\S)                                                   trailing whitespace (capped)
+|\s{1,16}                                                         remaining whitespace (capped)
+```
+Difference from the apertus reference stage-1: the word prefix is `[ ]?` (space only) rather than
+`[^\r\n\p{L}\p{N}]?`, and every punctuation/whitespace quantifier is `{…,16}`-capped. The uncapped
+clean variant is identical except the `{…,16}` caps become `+`.
+
+### clean-multi stage 2 (SuperBPE reduced)
+
+```
+\p{N}                                                            single digit (NOT upgraded to {1,3})
+| ?(?:[^\s\p{L}\p{N}\p{M}]\p{M}*){1,16}                          punctuation: each punct char + its combining marks, capped at 16
+|\s{0,16}[\r\n]{1,16}                                            newline boundary
+|\s{1,16}(?!\S)                                                  trailing whitespace
+```
+The **word patterns are removed**, so letter runs become gap text and BPE can form cross-word
+superwords (`theĠcat`, `defĠmain`). Single digits and single punctuation stay isolated (so operators
+and numbers don't fuse into superwords), and `\s*[\r\n]+` / trailing whitespace are kept, so superwords
+do not span line breaks or indentation. This satisfies the stage-2 constraint — it only *removes* the
+word boundary, never introduces a boundary stage 1 lacked, so stage-1 merges replay exactly.
 
 # Added Tokens in Apertus v1 Tokenizer
 
