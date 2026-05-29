@@ -50,7 +50,7 @@ Disclaimer: Claude helped compile this report from all of my analyses. All numbe
 
 I recommend PA-Clean-capped as the default. Against the current Apertus tokenizer it is fairer across languages (Gini, the inequality of per-language encoding cost, 0.081 against 0.205; lower is fairer) and encodes the multilingual text more compactly (about 0.023 against 0.0198 FLORES sentences per token), and it matches Apertus on downstream modeling quality over the training languages (FLORES bits-per-byte, trained languages, 1.169 against 1.168). It has the highest candidate math score (MC-math 0.295) and the highest candidate Python code-generation score (MBPP pass-rate 0.190); its clean-multi pretokenizer keeps math operators as separate tokens (operator-isolation 0.99).
 PA-Apertus-capped is the better fit where multilingual modeling matters more than code. It has the same fairness (Gini 0.081), but its pretokenizer merges operators with operands (operator-isolation 0.50), which lowers code generation (MBPP 0.058, below the clean-multi candidates at p_BH<0.001).
-SuperBPE-clean-cap-hw encodes English most compactly (5.01 bytes per token, against 4.24 for PA-Clean-capped) but is less fair (Gini 0.106). I'd treat it as provisional until its bits-per-byte are measured.
+SuperBPE-clean-cap-hw encodes English most compactly (5.01 bytes per token, against 4.24 for PA-Clean-capped), and its downstream quality is now measured: Val BPB 0.732 (against 0.729 for PA-Clean-capped), FLORES bits-per-byte over the trained languages 1.161, and MBPP pass-rate 0.196. It is less fair (Gini 0.106 against 0.081), which is the main reason it is not the default.
 For some use cases, the cost is a little English compression: the parity-aware candidates encode English at 4.24–4.34 bytes per token, against Apertus's 4.60. Apertus's own math and code scores are still running.
 Disqualified by a production-safety fail: Gemma 3 (see *Production-safety gates*).
 
@@ -105,8 +105,8 @@ This table shows multilingual compression (sent/tok), fairness (Gini), and vocab
 
 ## Missing evidence
 
-- **Standard-budget BPB for the clean SuperBPE candidate is not yet measured**, for either the t90k/128k or the t110k/130k variant. The clean SuperBPE recommendation is provisional until these are measured. If its Val BPB and FLORES BPB are worse than the PA-BPE candidates, PA-Clean-capped remains the default.
-- **Extrinsic coverage is partial.** The gpt4-pretok SuperBPE and PA-BPE variants and the right-aligned-digit variant have no trained model, and MultiBLiMP and MGSM are not run for every tokenizer. Those axes rest on the 1B proxy rather than a matched run.
+- **The Apertus baseline's math and code run is in progress**, so its MC-math and MBPP are pending. SuperBPE-gpt4-fw2full-hw has no standard run yet, so its Val and FLORES BPB are pending.
+- **Extrinsic coverage is uneven.** Not every tokenizer has both a standard and a math+code run, and MultiBLiMP and MGSM are missing for some; where a matched run is absent, the ablation rests on the 1B proxy. The paired-bootstrap MBPP confidence intervals have not been regenerated for the runs that just landed (for example BPE-rightalign), so those MBPP cells read pending until the bootstrap is rerun.
 - **Extrinsic numbers are single runs without seed variance.** MBPP is the exception (it has a paired-bootstrap CI). The MC-math difference between candidates (0.295 for PA-Clean-capped against 0.270 for PA-Apertus-capped) has no CI and is small.
 - **The LMs are small proxies.** Whether the parity-aware BPE fairness difference or the SuperBPE Eng B/tok difference is larger at the target model scale is not measured here.
 - **Vocabulary size is not swept.** Every candidate is near 128–131k, and size varies only alongside the SuperBPE transition rows, so it is confounded with the superword stage. A 64k/128k/256k sweep on one fixed design would separate the two.
@@ -169,7 +169,7 @@ At matched capped settings, parity-aware BPE has a Gini of 0.081 against 0.114 f
 
 This ablation tests whether adding a SuperBPE superword stage on top of the PA-BPE candidate base helps, on matched base and training data.
 
-Adding the SuperBPE stage raises Eng B/tok by 18–25% (clean: 4.24 to 5.01; apertus: 4.34 to 5.40) and raises Gini (clean: 0.081 to 0.106; apertus: 0.081 to 0.110); vocab utilization drops from 0.605 to 0.550. On the apertus base, FLORES BPB rises from 2.943 to 3.081 and MBPP drops from 0.058 to 0.004. The clean SuperBPE has an MBPP of 0.196, but its standard-budget Val BPB and FLORES BPB are not yet measured. Treat the SuperBPE candidate as provisional.
+Adding the SuperBPE stage raises Eng B/tok by 18–25% (clean: 4.24 to 5.01; apertus: 4.34 to 5.40) and raises Gini (clean: 0.081 to 0.106; apertus: 0.081 to 0.110); vocab utilization drops from 0.605 to 0.550. On the apertus base, FLORES BPB rises from 2.943 to 3.081 and MBPP drops from 0.058 to 0.004. On the clean base the downstream BPB is close to the PA-BPE base (Val BPB 0.732 against 0.729, FLORES bits-per-byte trained 1.161 against 1.169) and MBPP is higher (0.196 against 0.190); the cost is multilingual fairness.
 
 | Tokenizer | Eng comp (B/tok) ↑ | Multiling. sent/tok ↑ | Gini ↓ | Vocab size | Vocab util ↑ | Vocab-util CoV ↓ | CER ↓ | Boundary-cross ↓ | Operator-isol ↑ | Per-script UNK | Byte-frag (benign) | Long toks (>64) | Junk toks (≥8) ↓ |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -252,7 +252,7 @@ Base parity gives an Eng B/tok of 3.13, against 4.24 for hybrid-window, with a l
 
 This ablation compares two SuperBPE settings that change together: the stage-1 to stage-2 transition vocab size (90k against 110k) and the final vocab size (128k against 130k).
 
-The transition (90k to 110k) and the final vocab (128k to 130k) change together, so this is not a single-variable comparison. The later transition gives a higher sent/tok (0.0227 to 0.0232), a lower Gini (0.106 to 0.092), and a higher vocab utilization, at a lower Eng B/tok (5.01 to 4.87). The early math and code scores are higher for t110k (MC-math 0.268 to 0.288, MBPP 0.196 to 0.202), but the standard-budget BPB for both is not yet measured. Lean t110k/130k, pending BPB.
+The transition (90k to 110k) and the final vocab (128k to 130k) change together, so this is not a single-variable comparison. The later transition gives a higher sent/tok (0.0227 to 0.0232), a lower Gini (0.106 to 0.092), and a higher vocab utilization, at a lower Eng B/tok (5.01 to 4.87). Both now have standard-budget BPB (Val BPB 0.732 and FLORES bits-per-byte trained 1.161 for each); t110k has higher MC-math (0.288 against 0.268) and MBPP (0.202 against 0.196). Lean t110k/130k.
 
 | Tokenizer | Eng comp (B/tok) ↑ | Multiling. sent/tok ↑ | Vocab util ↑ | Vocab-util CoV ↓ | Vocab size | Gini ↓ | CER ↓ | Boundary-cross ↓ | Operator-isol ↑ | Byte-frag (benign) | Long toks (>64) | Junk toks (≥8) ↓ |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -853,7 +853,7 @@ Small transformers trained from scratch on each tokenizer (companion `tokenizer-
 | PA-Apertus-capped [matched] | 0.729 | 2.943 | 1.170 | 0.531 | 0.819 | 0.916 | 0.015 | 0.270 | 0.240 | 0.049 | 0.058 |
 | PA-Clean-capped [matched] | 0.729 | 2.965 | 1.169 | 0.533 | 0.816 | 0.919 | 0.013 | 0.295 | 0.232 | 0.055 | 0.190 |
 | SuperBPE·apertus-cap·hw·fw2full [matched] | 0.733 | 3.081 | 1.176 | 0.541 | 0.815 | 0.912 | 0.011 | 0.269 | 0.198 | 0.055 | 0.004 |
-| SuperBPE·clean-cap·hw·fw2full·t90k/128k [matched] | 0.732 | 3.038 | 1.161 | 0.536 | 0.814 | 0.920 | pending | 0.268 | 0.222 | 0.073 | 0.196 |
+| SuperBPE·clean-cap·hw·fw2full·t90k/128k [matched] | 0.732 | 3.038 | 1.161 | 0.536 | 0.814 | 0.920 | 0.010 | 0.268 | 0.222 | 0.073 | 0.196 |
 | Apertus [matched] | 0.720 | 2.768 | 1.168 | 0.526 | 0.819 | 0.914 | 0.012 | pending | pending | pending | pending |
 | BPE-Clean-uncapped [matched] | 0.716 | 2.654 | 1.157 | 0.523 | 0.821 | 0.910 | 0.012 | 0.270 | 0.216 | 0.018 | 0.148 |
 | BPE-gpt2 [matched] | 0.713 | 2.640 | 1.157 | 0.515 | 0.816 | 0.909 | 0.012 | — | — | — | — |
@@ -863,7 +863,7 @@ Small transformers trained from scratch on each tokenizer (companion `tokenizer-
 | PA-gpt4-fineweb2full [matched] | 0.728 | 2.962 | 1.169 | 0.531 | 0.827 | 0.914 | 0.012 | — | — | — | — |
 | SuperBPE(PA-base)·clean-c2·t90k [matched] | 0.729 | 2.656 | 1.169 | 0.526 | 0.811 | 0.911 | 0.007 | — | — | — | — |
 | SuperBPE(PA-base)·clean-c3·t90k [matched] | 0.730 | 2.650 | 1.173 | 0.531 | 0.803 | 0.919 | 0.007 | — | — | — | — |
-| SuperBPE·clean-cap·hw·fw2full·t110k/130k [matched] | 0.732 | 2.993 | 1.161 | 0.534 | 0.821 | 0.912 | pending | 0.288 | 0.236 | 0.104 | 0.202 |
+| SuperBPE·clean-cap·hw·fw2full·t110k/130k [matched] | 0.732 | 2.993 | 1.161 | 0.534 | 0.821 | 0.912 | 0.008 | 0.288 | 0.236 | 0.104 | 0.202 |
 | SuperBPE·gpt4·hw·fw2full [matched] | pending | pending | pending | pending | pending | pending | pending | 0.265 | 0.198 | 0.085 | 0.070 |
 | SuperBPE(PA-base)·gpt4o·t64k [matched] | 0.729 | 2.658 | 1.180 | 0.530 | 0.792 | 0.920 | 0.006 | — | — | — | — |
 | SuperBPE(PA-base)·gpt4o·t90k [matched] | 0.729 | 2.659 | 1.181 | 0.528 | 0.801 | 0.916 | 0.006 | — | — | — | — |
