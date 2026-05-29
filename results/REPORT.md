@@ -48,8 +48,10 @@ Disclaimer: Claude helped compile this report from all of my analyses. All numbe
 
 ## Recommendation
 
-I recommend PA-Clean-capped as the default. Use PA-Apertus-capped where multilingual FLORES BPB matters more than code generation. SuperBPE-clean-cap-hw is provisional: its Val BPB and FLORES BPB are not yet measured.
-PA-Apertus-capped has an operator-isolation of 0.50 (operators are tokenized together with operands), and its MBPP of 0.058 is below the clean-multi candidates at p_BH<0.001. The clean-multi candidates have an operator-isolation of 0.99 and an MBPP of 0.190.
+I recommend PA-Clean-capped as the default. Against the current Apertus tokenizer it is fairer across languages (Gini, the inequality of per-language encoding cost, 0.081 against 0.205; lower is fairer) and encodes the multilingual text more compactly (about 0.023 against 0.0198 FLORES sentences per token), and it matches Apertus on downstream modeling quality over the training languages (FLORES bits-per-byte, trained languages, 1.169 against 1.168). It has the highest candidate math score (MC-math 0.295) and the highest candidate Python code-generation score (MBPP pass-rate 0.190); its clean-multi pretokenizer keeps math operators as separate tokens (operator-isolation 0.99).
+PA-Apertus-capped is the better fit where multilingual modeling matters more than code. It has the same fairness (Gini 0.081), but its pretokenizer merges operators with operands (operator-isolation 0.50), which lowers code generation (MBPP 0.058, below the clean-multi candidates at p_BH<0.001).
+SuperBPE-clean-cap-hw encodes English most compactly (5.01 bytes per token, against 4.24 for PA-Clean-capped) but is less fair (Gini 0.106). I'd treat it as provisional until its bits-per-byte are measured.
+For some use cases, the cost is a little English compression: the parity-aware candidates encode English at 4.24–4.34 bytes per token, against Apertus's 4.60. Apertus's own math and code scores are still running.
 Disqualified by a production-safety fail: Gemma 3 (see *Production-safety gates*).
 
 ## Metric guide
@@ -65,14 +67,14 @@ Full definitions in *Methods and metrics*.
 
 ## Candidate comparison
 
-The recommended tokenizers and the current Apertus production baseline, on the decision metrics. The intrinsic columns are computed on the broad FLORES set. Val BPB, FLORES BPB, MC-math, and MBPP come from the downstream language models. FLORES BPB here is the macro-mean over the 31 FLORES languages in the LM training set; the full 214-language macro is in the appendix. The Apertus baseline has a standard (10B balanced) run but no math+code run, so its MC-math and MBPP are blank. `pending` means not yet measured, and `—` means not run.
+The recommended tokenizers and the current Apertus production baseline, on the decision metrics. The intrinsic columns are computed on the broad FLORES set. Val BPB, FLORES BPB, MC-math, and MBPP come from the downstream language models. FLORES BPB here is the macro-mean over the 31 FLORES languages in the LM training set; the full 214-language macro is in the appendix. The Apertus baseline's math+code run is in progress, so its MC-math and MBPP are `pending`. `pending` means the run is mapped but not yet measured, and `—` means not run.
 
 | Tokenizer | Role | Multiling. sent/tok ↑ | Gini ↓ | Vocab-util CoV ↓ | Eng B/tok ↑ | Vocab util ↑ | Val BPB ↓ | FLORES BPB (trained) ↓ | MC-math ↑ | MBPP ↑ [95% CI] | Gate |
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | PA-Clean-capped | default | 0.0232 | 0.081 | 0.4138 | 4.24 | 0.605 | 0.729 | 1.169 | 0.295 | 0.190 [0.158, 0.224] | warn |
 | PA-Apertus-capped | conditional | 0.0233 | 0.081 | 0.4130 | 4.34 | 0.606 | 0.729 | 1.170 | 0.270 | 0.058 [0.038, 0.080] | warn |
-| SuperBPE·clean-cap·hw·fw2full·t90k/128k | provisional | 0.0227 | 0.106 | 0.4892 | 5.01 | 0.550 | pending | pending | 0.268 | 0.196 [0.162, 0.232] | warn |
-| Apertus | baseline | 0.0198 | 0.205 | 0.5133 | 4.60 | 0.561 | 0.720 | 1.168 | — | — | warn |
+| SuperBPE·clean-cap·hw·fw2full·t90k/128k | provisional | 0.0227 | 0.106 | 0.4892 | 5.01 | 0.550 | 0.732 | 1.161 | 0.268 | 0.196 [0.162, 0.232] | warn |
+| Apertus | baseline | 0.0198 | 0.205 | 0.5133 | 4.60 | 0.561 | 0.720 | 1.168 | pending | pending | warn |
 
 `warn` is advisory: for NFC tokenizers exact-match below 1.0 is canonical re-spelling, not loss. MBPP has a paired-bootstrap 95% CI; MC-math is a single run.
 
@@ -186,7 +188,7 @@ Adding the SuperBPE stage raises Eng B/tok by 18–25% (clean: 4.24 to 5.01; ape
 | PA-Apertus-capped [matched] | 0.729 | 2.943 | 0.531 | 0.270 | 0.058 [0.038, 0.080] |
 | SuperBPE·apertus-cap·hw·fw2full [matched] | 0.733 | 3.081 | 0.541 | 0.269 | 0.004 [0.000, 0.010] |
 | PA-Clean-capped [matched] | 0.729 | 2.965 | 0.533 | 0.295 | 0.190 [0.158, 0.224] |
-| SuperBPE·clean-cap·hw·fw2full·t90k/128k [matched] | pending | pending | pending | 0.268 | 0.196 [0.162, 0.232] |
+| SuperBPE·clean-cap·hw·fw2full·t90k/128k [matched] | 0.732 | 3.038 | 0.536 | 0.268 | 0.196 [0.162, 0.232] |
 
 ### Pretokenizer family (apertus vs clean-multi vs gpt4)
 
@@ -266,12 +268,12 @@ The transition (90k to 110k) and the final vocab (128k to 130k) change together,
 *Extrinsic (downstream LM):*
 | Tokenizer | Val BPB ↓ | FLORES BPB ↓ | Code BPB ↓ | MC-math ↑ | MBPP ↑ [95% CI] |
 |---|---|---|---|---|---|
-| SuperBPE·clean-cap·hw·fw2full·t90k/128k [matched] | pending | pending | pending | 0.268 | 0.196 [0.162, 0.232] |
-| SuperBPE·clean-cap·hw·fw2full·t110k/130k [matched] | pending | pending | pending | 0.288 | pending |
+| SuperBPE·clean-cap·hw·fw2full·t90k/128k [matched] | 0.732 | 3.038 | 0.536 | 0.268 | 0.196 [0.162, 0.232] |
+| SuperBPE·clean-cap·hw·fw2full·t110k/130k [matched] | 0.732 | 2.993 | 0.534 | 0.288 | pending |
 
 **Further ablations.** Additional design points, reported in full under *Appendix — additional ablations*:
 - **PA-BPE training-data config (gpt4: balanced vs FineWeb2-full)** — training corpus on a fixed gpt4 pretok (balanced vs FineWeb2-full); FineWeb2-full is far fairer multilingually.
-- **Parity tuning — European-family up-weighting (original ×1.0 → ×1.1 → ×1.2)** — European-family ratio strength; a higher ratio slightly raises English density at a small fairness cost.
+- **Parity tuning — European-family up-weighting (original ×1.0 → ×1.1 → ×1.2)** — European-family ratio strength; a higher ratio slightly raises English bytes per token at a small fairness cost.
 - **Tuned config — semitic regroup of script-mismatched languages (with vs without)** — regrouping script-mismatched languages into the semitic group; effects are local to those scripts, not the global averages.
 - **SuperBPE base, transition point & stage-2 preset** — balanced-data SuperBPE sweep over base, transition (64k/90k) and stage-2 preset.
 - **SuperBPE training data (balanced vs FineWeb2-full)** — balanced vs FineWeb2-full under SuperBPE; FineWeb2-full restores the multilingual fairness lost on balanced data.
@@ -559,7 +561,7 @@ Every column of the candidate and reference intrinsic tables, per FLORES set. Th
 | PA-Apertus-capped | 127,835 | 4 | 4.336 | **0.0233** | **0.606** | **0.4130** | **0.081** | 0.00043 | 0.02208 | 0.502 | 0.104 | **0.729** | **2.943** |
 | PA-Clean-capped | 127,835 | 4 | 4.238 | 0.0232 | 0.605 | 0.4138 | **0.081** | 0.00043 | **0.02198** | **0.987** | 0.095 | **0.729** | 2.965 |
 | SuperBPE·apertus-cap·hw·fw2full | 128,000 | 0 | **5.402** | 0.0230 | 0.544 | 0.4992 | 0.110 | 0.00043 | 0.02686 | 0.466 | 0.092 | 0.733 | 3.081 |
-| SuperBPE·clean-cap·hw·fw2full·t90k/128k | 128,000 | 0 | 5.013 | 0.0227 | 0.550 | 0.4892 | 0.106 | 0.00043 | 0.02629 | **0.987** | **0.081** | pending | pending |
+| SuperBPE·clean-cap·hw·fw2full·t90k/128k | 128,000 | 0 | 5.013 | 0.0227 | 0.550 | 0.4892 | 0.106 | 0.00043 | 0.02629 | **0.987** | **0.081** | 0.732 | 3.038 |
 
 **Open-source references:**
 
@@ -774,7 +776,7 @@ This ablation compares the hybrid-window parity rule against base parity across 
 | Tokenizer | Val BPB ↓ | FLORES BPB ↓ | Code BPB ↓ | MC-math ↑ | MBPP ↑ [95% CI] |
 |---|---|---|---|---|---|
 | SuperBPE·apertus-cap·hw·fw2full [matched] | 0.733 | 3.081 | 0.541 | 0.269 | 0.004 [0.000, 0.010] |
-| SuperBPE·clean-cap·hw·fw2full·t90k/128k [matched] | pending | pending | pending | 0.268 | 0.196 [0.162, 0.232] |
+| SuperBPE·clean-cap·hw·fw2full·t90k/128k [matched] | 0.732 | 3.038 | 0.536 | 0.268 | 0.196 [0.162, 0.232] |
 | SuperBPE·gpt4·hw·fw2full [matched] | pending | pending | pending | 0.265 | pending |
 
 ### Algorithm / pretok (plain BPE vs Unigram, right-align digits, gpt2-style)
@@ -795,7 +797,7 @@ This ablation compares plain-BPE pretokenizer variants (gpt2-style, right-aligne
 | Tokenizer | Val BPB ↓ | FLORES BPB ↓ | Code BPB ↓ | MC-math ↑ | MBPP ↑ [95% CI] |
 |---|---|---|---|---|---|
 | BPE-gpt2 [matched] | 0.713 | 2.640 | 0.515 | — | — |
-| BPE-rightalign [matched] | 0.712 | 2.644 | 0.519 | pending | pending |
+| BPE-rightalign [matched] | 0.712 | 2.644 | 0.519 | 0.295 | pending |
 | Unigram-gpt4o [matched] | 0.731 | 2.686 | 0.554 | — | — |
 
 *[proxy] tokenizer-lm 1B-balanced Δ, factor: Algorithm* (Δ = B−A; BPB Δ<0 means B better; **bold** = p_adj<0.05):
@@ -848,20 +850,20 @@ Small transformers trained from scratch on each tokenizer (companion `tokenizer-
 **Full per-tokenizer results** (point estimates; `[matched]`/`[proxy]`/`pending`/`—` as in the ablations; MBPP/GSM8K/HumanEval 95% CIs in `bootstrap_mathcode_significance.json`, MBPP CI shown with the ablations). **BLiMP is Option-B (BOS / empty-context) scoring for all rows.** The main eval files mix Option-A and Option-B, which are not comparable, so only Option-B is reported; `optA-only` flags a run that has no Option-B eval (its Option-A value is omitted, not substituted):
 | Tokenizer | Val BPB ↓ | FLORES all ↓ | FLORES tr ↓ | Code BPB ↓ | BLiMP ↑ | MultiBLiMP ↑ | MGSM ↑ | MC-math ↑ | GSM8K ↑ | HumanEval ↑ | MBPP ↑ |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| PA-Apertus-capped [matched] | 0.729 | 2.943 | 1.170 | 0.531 | 0.819 | 0.916 | pending | 0.270 | 0.240 | 0.049 | 0.058 |
+| PA-Apertus-capped [matched] | 0.729 | 2.943 | 1.170 | 0.531 | 0.819 | 0.916 | 0.015 | 0.270 | 0.240 | 0.049 | 0.058 |
 | PA-Clean-capped [matched] | 0.729 | 2.965 | 1.169 | 0.533 | 0.816 | 0.919 | 0.013 | 0.295 | 0.232 | 0.055 | 0.190 |
 | SuperBPE·apertus-cap·hw·fw2full [matched] | 0.733 | 3.081 | 1.176 | 0.541 | 0.815 | 0.912 | 0.011 | 0.269 | 0.198 | 0.055 | 0.004 |
-| SuperBPE·clean-cap·hw·fw2full·t90k/128k [matched] | pending | pending | pending | pending | pending | pending | pending | 0.268 | 0.222 | 0.073 | 0.196 |
-| Apertus [matched] | 0.720 | 2.768 | 1.168 | 0.526 | 0.819 | 0.914 | 0.012 | — | — | — | — |
-| BPE-Clean-uncapped [matched] | 0.716 | 2.654 | 1.157 | 0.523 | 0.821 | 0.910 | pending | 0.270 | 0.216 | 0.018 | 0.148 |
+| SuperBPE·clean-cap·hw·fw2full·t90k/128k [matched] | 0.732 | 3.038 | 1.161 | 0.536 | 0.814 | 0.920 | pending | 0.268 | 0.222 | 0.073 | 0.196 |
+| Apertus [matched] | 0.720 | 2.768 | 1.168 | 0.526 | 0.819 | 0.914 | 0.012 | pending | pending | pending | pending |
+| BPE-Clean-uncapped [matched] | 0.716 | 2.654 | 1.157 | 0.523 | 0.821 | 0.910 | 0.012 | 0.270 | 0.216 | 0.018 | 0.148 |
 | BPE-gpt2 [matched] | 0.713 | 2.640 | 1.157 | 0.515 | 0.816 | 0.909 | 0.012 | — | — | — | — |
-| BPE-rightalign [matched] | 0.712 | 2.644 | 1.160 | 0.519 | 0.816 | 0.912 | 0.012 | pending | pending | pending | pending |
+| BPE-rightalign [matched] | 0.712 | 2.644 | 1.160 | 0.519 | 0.816 | 0.912 | 0.012 | 0.295 | 0.252 | 0.061 | 0.062 |
 | PA-Clean-uncapped [matched] | 0.728 | 2.966 | 1.167 | 0.529 | 0.818 | 0.917 | 0.009 | — | — | — | — |
 | PA-gpt4-balanced [matched] | 0.719 | 2.662 | 1.177 | 0.524 | 0.816 | 0.914 | 0.011 | — | — | — | — |
 | PA-gpt4-fineweb2full [matched] | 0.728 | 2.962 | 1.169 | 0.531 | 0.827 | 0.914 | 0.012 | — | — | — | — |
 | SuperBPE(PA-base)·clean-c2·t90k [matched] | 0.729 | 2.656 | 1.169 | 0.526 | 0.811 | 0.911 | 0.007 | — | — | — | — |
 | SuperBPE(PA-base)·clean-c3·t90k [matched] | 0.730 | 2.650 | 1.173 | 0.531 | 0.803 | 0.919 | 0.007 | — | — | — | — |
-| SuperBPE·clean-cap·hw·fw2full·t110k/130k [matched] | pending | pending | pending | pending | pending | pending | pending | 0.288 | 0.236 | 0.104 | 0.202 |
+| SuperBPE·clean-cap·hw·fw2full·t110k/130k [matched] | 0.732 | 2.993 | 1.161 | 0.534 | 0.821 | 0.912 | pending | 0.288 | 0.236 | 0.104 | 0.202 |
 | SuperBPE·gpt4·hw·fw2full [matched] | pending | pending | pending | pending | pending | pending | pending | 0.265 | 0.198 | 0.085 | 0.070 |
 | SuperBPE(PA-base)·gpt4o·t64k [matched] | 0.729 | 2.658 | 1.180 | 0.530 | 0.792 | 0.920 | 0.006 | — | — | — | — |
 | SuperBPE(PA-base)·gpt4o·t90k [matched] | 0.729 | 2.659 | 1.181 | 0.528 | 0.801 | 0.916 | 0.006 | — | — | — | — |
