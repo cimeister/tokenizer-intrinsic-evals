@@ -1,28 +1,39 @@
-# Pretokenization: design choices
+# Tokenizer design choices
 
-> **Current direction (what the report's candidates use): the `clean-multi` pretokenizer (capped),
-> with a reduced SuperBPE stage-2 regex.** `clean-multi` resolves the decisions below in their
-> multilingual-safe form — case-splitting **on**, single-digit `\p{N}`, **no** trailing-char fusion
-> (Decision 3 Option C), `\p{M}` included in word patterns — and adds two things the apertus reference
-> regex does not:
-> 1. a **space-only word prefix** (`[ ]?` instead of `[^\r\n\p{L}\p{N}]?`), so leading punctuation and
->    apostrophes do **not** attach forward: `don't` → `don | ' | t`, keeping English contraction
->    patterns out of the multilingual vocabulary;
-> 2. **length-capped** punctuation/whitespace runs (`{1,16}`), so BPE cannot build long
->    decorative-junk tokens (`----`, `====`, space runs) — byte-identical to the uncapped form on
->    normal text/code/math.
+This document collects the tokenizer-design decisions for the Apertus successor work.
+Pretokenization decisions are covered first (the main content), followed by a stub for
+algorithmic decisions (parity-aware training, SuperBPE, vocabulary size) that will be
+written up as they are revisited. The added-token / special-token addenda for the Apertus
+v1 tokenizer are kept at the end as a reference.
+
+## Pretokenization
+
+> **Status.** The clean-multi family is the current candidate set. Three extensions
+> (`plus`, `plus2`, `plus3`) are documented as single-variable changes that close specific
+> per-language gaps against the Apertus reference. The selection between `clean-multi`
+> (capped), `plus2`, and `plus3` is still open. `plus` is included for completeness as the
+> step that closes the Tibetan gap; it is not in the report's current intrinsic roster.
+> Downstream LM training has not yet been done for any of the plus variants.
 >
-> The exact stage-1 and stage-2 patterns are in
-> [clean-multi regex (current direction)](#clean-multi-regex-current-direction) at the end. The
-> apertus-specific regex and added-token material below is retained as the comparison reference.
+> The baseline `clean-multi` resolves the decisions below in their multilingual-safe form:
+> case-splitting on, single-digit `\p{N}`, no trailing-char fusion (Decision 3 Option C),
+> `\p{M}` in word patterns. It differs from the Apertus reference regex on two further axes:
+> a space-only word prefix (`[ ]?` instead of `[^\r\n\p{L}\p{N}]?`), and `{1,16}` length
+> caps on punctuation/whitespace runs. The plus lineage adds a fifth axis: how much an
+> apostrophe (or Tibetan tsek) attaches to an adjacent word arm.
+>
+> The extensions, the gaps they close, and the per-language numbers are in
+> [Clean-multi family: targeted extensions](#clean-multi-family-targeted-extensions). The
+> Apertus reference regex and added-token material below are retained as the comparison
+> reference.
 
-## Background: what pretokenization is and why it matters 
+### Background: what pretokenization is and why it matters 
 
 **Pretokenization** is a preprocessing step that happens *before* tokenizer training (and before text encoding at inference time). It splits raw text into coarse chunks called **pre-tokens** using a regex. Tokenization algorithms (including BPE) then operate independently within each pre-token, e.g., BPE merges can never cross pre-token boundaries. In short, this is the mechanism that controls what can become a token.
 
 Why not just let algorithms run on raw text with no pre-splitting? a) Algorithms like BPE are greedy and frequency-driven, with no knowledge about the text they're operating. Without pretokenization boundaries, we can gets tokens that split ascii characters (if we're using a byte-level tokenizer), cross multiple whitespace or sentence boundaries, and generally block other more sensible options that would lead to better compression globally. We can think of pretokenization as a place for us to add inductive biases. Of course, as with most inductive biases, it has potential to be harmful just as much as helpful. b) Algorithm efficiency; won't go into details here but in a nut shell, you would have to store the entire corpus in memory instead of just sufficient statistics without chunking text into pretokens.
 
-### Concrete example of why pretokenization helps
+#### Concrete example of why pretokenization helps
 
 Suppose BPE is trained on the following corpus with no pretokenization applied (␣ = space):
 
@@ -38,7 +49,7 @@ Suppose BPE is trained on the following corpus with no pretokenization applied (
 
 Without pretokenization, BPE sees `n␣n` as a high-frequency bigram (350 occurrences across "in need" and "on now"). Meanwhile, the within-word pairs like `ne` (across all "new/newer/newest" = 180) and `se` (across "sew/sewn" = 80) are less frequent.
 
-#### Cross-Boundary Merges
+##### Cross-Boundary Merges
 
 **Step 1:** `n` + `␣` → `n␣` merges (350 from "in␣" and "on␣").
 
@@ -46,24 +57,24 @@ Without pretokenization, BPE sees `n␣n` as a high-frequency bigram (350 occurr
 
 Now `n␣n` is a single token.
 
-#### The Blocking Effect
+##### The Blocking Effect
 
 **On "new":** When the corpus contains `i n ␣ n e w`, BPE segments it as `i [n␣n] e w`. The cross-boundary token has consumed the initial `n` of "new." The `n` is no longer available to merge with `e` to eventually form useful tokens like `ne`, `new`, or `newer`. We can't form a token that utilizes the word's morphological structure.
 
 **On "now":** Similarly, `o n ␣ n o w` becomes `o [n␣n] o w`, tearing `n` away from `ow`.
 
-#### With Pretokenization
+##### With Pretokenization
 
 With pretokenization (splitting at whitespace first), BPE would never see `n␣n` as a candidate. Instead, it processes each word independently and learns useful merges like `n` + `e` → `ne`, then `ne` + `w` → `new` — tokens that respect word boundaries and capture morphological structure.
 
 
-## How pretokenization regex works in practice
+### How pretokenization regex works in practice
 
 Pretokenization is often done simply with regex, applied left-to-right. Matched substrings become isolated pre-tokens; unmatched text between matches also becomes pre-tokens. If you use a byte-level tokenizer, then after regex splitting, byte-level encoding converts each pre-token into a sequence of bytes, using a character mapping. Space and newlines are often given their own special symbols, e.g.,  `Ġ` and `Ċ`. As a concrete example, consider the text `the cat sat`. If we use a word-matching pretokenization patter, the regex matches `the`, ` cat`, and ` sat` as separate pre-tokens (the leading space is captured as part of each word by the pattern's optional prefix). BPE sees three independent byte sequences: `the`, `Ġcat`, `Ġsat`. It can learn merges like `c` + `a` → `ca` within `Ġcat`, but can never learn a merge that bridges from `the` into `Ġcat`.
 
 Note: If we use SuperBPE, stage 1 and stage 2 use different regexes. Stage 1 might define pretokens according to word boundaries, while stage 2 removes this criterion for pretoken splitting, so "superword" tokens can form across spaces. 
 
-### Examples
+#### Examples
 Here are examples of two pretokenization schemes and the concrete implications of the choices
 
 **Apertus Pretokenization** (identical to GPT-4 except digits are `\p{N}` instead of `\p{N}{1,3}` -> tokens can consist of spans of up to 3 digits in the latter case):
@@ -96,11 +107,11 @@ Design choices: words are not split at case transitions (CamelCase stays as one 
 
 ---
 
-## Tokenizer Design Choices (pretokenization)
+### Design choices
 
 Now I'll cover the design choices that the tokenization team is facing and what we're planning to do
 
-### Decision 1: Case-boundary splitting
+#### Decision 1: Case-boundary splitting
 
 **Should we split words at uppercase/lowercase transitions?**
 
@@ -138,7 +149,7 @@ getHTTPResponse → getHTTPResponse
 **Current choice:** split (Option A). The subword-sharing benefit for code is substantial, the cost for natural language is arguably minor (`Mc` | `Donald` is a rare annoyance), and cross-script splitting is a useful bonus for multilingual text. If using SuperBPE, splitting also gives stage 2 more to work with — stage 1 learns good subword components, and stage 2 can re-merge them into cross-word tokens where useful.
 
 
-### Decision 2: Digit grouping
+#### Decision 2: Digit grouping
 
 **How should digit sequences be pre-split?**
 
@@ -182,7 +193,7 @@ discussion** — not a settled best practice.
 
 Stage 1 with `\p{N}` gives a clean baseline: zero merge budget spent on digits, all merges dedicated to learning language structure. Because single-digit pre-tokens contain no internal merges, switching to `\p{N}{1,3}` in stage 2 would be guaranteed safe — it only *merges* adjacent stage 1 pre-tokens (combining `7` | `6` | `8` into `768`), never *splits* them. Stage 2 could then learn multi-digit tokens within the superword vocabulary; the shipped clean-multi stage-2 does not currently take this option.
 
-### Decision 3: Punctuation trailing characters
+#### Decision 3: Punctuation trailing characters
 
 **Should the punctuation pattern consume trailing newlines and/or slashes, meaning trailing enwlines and/or slashes can be included in a pretoken?**
 
@@ -227,7 +238,7 @@ x = 1\n (no punct before) → ... | \n (A/B/C: newline is separate anyway)
 ```
 
 
-### Decision 3b: Punctuation / whitespace run length (capping)
+#### Decision 3b: Punctuation / whitespace run length (capping)
 
 **Should runs of punctuation/symbols and runs of whitespace be allowed to grow without bound, or
 capped at a fixed length?**
@@ -263,7 +274,7 @@ bounded to 16 characters per pre-token; longer runs are split into ≤16-char pi
 the report's "capped" and "uncapped" tokenizer variants; the capped form is the current direction. The
 uncapped clean variant is otherwise identical (the caps revert to `+`).
 
-### Decision 4: SuperBPE stage 2 reduced regex
+#### Decision 4: SuperBPE stage 2 reduced regex
 
 **If using SuperBPE, what should the stage 2 regex look like?**
 
@@ -297,7 +308,7 @@ clean-multi keeps punctuation fully isolated, limiting superwords to natural-lan
 Further loosening (removing trailing whitespace / newlines, or the digit upgrade) remains to be
 experimented with.
 
-### Decision 4b: Operator / punctuation separation (clean-multi vs apertus)
+#### Decision 4b: Operator / punctuation separation (clean-multi vs apertus)
 
 **Should operators and punctuation be kept as isolated pre-tokens, or allowed to fuse with adjacent
 text into larger tokens (especially superwords)?**
@@ -327,31 +338,33 @@ punctuation pattern; the question is how aggressively stage 2 lets that boundary
 **Trade-offs:** fusing operators can shorten code slightly (fewer tokens for common operator+space
 patterns) and is harmless for pure compression, but it concentrates code structure into a few
 superword tokens that the model then has to emit exactly — the failure mode behind the apertus MBPP
-regression. Keeping them isolated costs a little code compression but preserves robust, position-stable
-operator/line structure.
+regression. Keeping them isolated costs a little code compression but preserves position-stable
+operator and line structure.
 
 **Current choice:** keep operators/punctuation isolated (clean-multi). Operators and single punctuation
 are never fused; superwords are limited to natural-language word sequences.
 
-### (Non-)Decision 5: Inclusion of combining marks (\p{M}) in the word pattern
+#### (Non-)Decision 5: Inclusion of combining marks (\p{M}) in the word pattern
 There's not much need to think about this decision in our context... we should include this to enable better multilingual support. Many scripts use Unicode combining marks (\p{M}) as integral parts of words: vowel signs, virama/halant, tone marks, and diacritics. These characters are not \p{L} (letters). A word pattern that only matches \p{L}+ breaks at every combining mark, fragmenting words in Indic scripts, Thai, Bengali, Tamil, and diacritical Arabic. Some tokenizers get away with this design choice (e.g., Qwen 3), but I don't really see what advantages it brings.
 
 
-## Summary of reference tokenizer choices
+### Summary of reference tokenizer choices
 
-| Decision | GPT-4 | Apertus (ref.) | Qwen 3 | **clean-multi (current direction)** |
-|----------|-------|-------------------|------|------|
+| Decision | GPT-4 | Apertus (ref.) | Qwen 3 | **clean-multi family** |
+|----------|-------|----------------|--------|------------------------|
 | `\p{M}` in word pattern | Yes | Yes | **No** (breaks Indic, Thai, Arabic) | **Yes** |
 | Case splitting | Yes | Yes | No | **Yes** |
 | Digit grouping | `\p{N}{1,3}` | `\p{N}` | `\p{N}` | **`\p{N}` (both stages)** |
 | Punct trailing | `[\r\n/]*` | `[\r\n/]*` | `[\r\n]*` | **none (Option C)** |
+| Word prefix | `[^\r\n\p{L}\p{N}]?` | `[^\r\n\p{L}\p{N}]?` | `[^\r\n\p{L}\p{N}]?` | **`[ ]?` baseline; extended in `plus` / `plus2` / `plus3`** |
+| Punct/whitespace caps | none | none | none | **`{1,16}` (capped variants)** |
+| Apostrophe attach (forward / trailing) | both via leading class | both via leading class | dedicated contractions branch | **see [Clean-multi family: targeted extensions](#clean-multi-family-targeted-extensions)** |
 
-Beyond the four decisions above, `clean-multi` differs from the apertus reference in two further
-respects (see the callout at the top and the regex blocks below): a **space-only word prefix** `[ ]?`
-(the apertus/GPT-4 reference allows a non-space leading char, so apostrophes attach forward there) and
-**`{1,16}` length caps** on punctuation/whitespace runs (the references are uncapped).
+The first four rows are the standard pretokenization decisions covered in [Design choices](#design-choices).
+The bottom three rows record axes on which the clean-multi family differs from every reference and on
+which the lineage is still being iterated.
 
-### New Apertus Regex
+#### Apertus reference stage-1 regex
 
 ```
 [^\r\n\p{L}\p{N}]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}]*[\p{Ll}\p{Lm}\p{Lo}\p{M}]+   word (ends lowercase)
@@ -363,7 +376,7 @@ respects (see the callout at the top and the regex blocks below): a **space-only
 |\s+                                                                                remaining whitespace
 ```
 
-### Possible Stage 2 Regex if using SuperBPE
+#### Apertus reference stage-2 regex (if using SuperBPE)
 
 ```
 \p{N}{1,3}(?=(?:\p{N}{3})(?:\P{N}|$))                                              digit group (up to 3, separated right to left)
@@ -372,15 +385,16 @@ respects (see the callout at the top and the regex blocks below): a **space-only
 |\s+(?!\S)                                                                          trailing whitespace
 ```
 
-## clean-multi regex (current direction)
+### Clean-multi family — concrete stage-1 patterns
 
 The patterns below are taken verbatim from the shipped `clean-multi` (capped) tokenizers used by the
 report's candidates (`PA-Clean-capped`, `SuperBPE-clean-fw2full-hw`). They are the concrete form of the
 decisions above: case-splitting on, single-digit `\p{N}`, no trailing-char fusion, `\p{M}` in the word
-arms — plus the **space-only word prefix** `[ ]?` (apostrophes/punctuation do not attach forward) and
-the **`{1,16}` caps** on punctuation/whitespace runs.
+arms, the space-only word prefix `[ ]?` (apostrophes and punctuation do not attach forward), and
+`{1,16}` caps on punctuation/whitespace runs. The targeted extensions (`plus`, `plus2`, `plus3`) are
+shown in the next section as deltas against this baseline.
 
-### clean-multi stage 1
+#### Clean-multi stage 1
 
 ```
 [ ]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}]*[\p{Ll}\p{Lm}\p{Lo}\p{M}]+    word (ends lowercase), space-only prefix
@@ -395,7 +409,7 @@ Difference from the apertus reference stage-1: the word prefix is `[ ]?` (space 
 `[^\r\n\p{L}\p{N}]?`, and every punctuation/whitespace quantifier is `{…,16}`-capped. The uncapped
 clean variant is identical except the `{…,16}` caps become `+`.
 
-### clean-multi stage 2 (SuperBPE reduced)
+#### Clean-multi stage 2 (SuperBPE reduced)
 
 ```
 \p{N}                                                            single digit (NOT upgraded to {1,3})
@@ -409,11 +423,209 @@ and numbers don't fuse into superwords), and `\s*[\r\n]+` / trailing whitespace 
 do not span line breaks or indentation. This satisfies the stage-2 constraint — it only *removes* the
 word boundary, never introduces a boundary stage 1 lacked, so stage-1 merges replay exactly.
 
-# Added Tokens in Apertus v1 Tokenizer
+### Clean-multi family: targeted extensions
+
+The `plus` / `plus2` / `plus3` extensions are single-variable regex changes against the `clean-multi`
+(capped) baseline. Each closes a specific per-language gap against `apertus_capped` while leaving the
+other decisions in this document unchanged (same word arms, same digit handling, same trailing-char
+rule, same caps, same stage-2 reduction). Stage 2 is unaffected by the choice of extension; the
+clean-multi stage-2 regex above applies to all variants.
+
+Lineage summary (PA hyb+win, tuned config, FLORES dev meanTPS; lower is denser encoding):
+
+| variant       | aggregate meanTPS | engCR | Gini   | vocabCoV | FineWeb-Edu B/tok |
+|---------------|-------------------|-------|--------|----------|-------------------|
+| `clean-multi` | 48.28             | 4.44  | 0.1024 | 0.395    | 4.22              |
+| `plus`        | 47.97             | 4.46  | 0.0976 | 0.395    | 4.23              |
+| `plus2`       | **47.89**         | 4.46  | 0.0976 | 0.394    | **4.24**          |
+| `plus3`       | pending           | —     | —      | —        | —                 |
+| `apertus_capped` | 47.82          | 4.48  | 0.0977 | 0.394    | 4.31              |
+
+`plus2` is within 0.15% of `apertus_capped` on aggregate meanTPS and matches it on Gini and vocab-CoV.
+The `plus3` `_tuned` runs (SLURM 2462027 / 2462028) are in flight at time of writing. Code compression
+is **not** closed by any extension; the 7.8% gap vs Apertus is structural (see the `plus2` subsection).
+
+#### plus — Tibetan tsek and English contractions
+
+`plus` makes two changes vs the `clean-multi` (capped) baseline:
+
+1. The word-arm leading character class is extended from `[ ]?` to `[ \x{0F0B}]?`. The Tibetan tsek
+   (U+0F0B) is the canonical syllable separator in Tibetan-script languages. Under plain `clean-multi`,
+   every tsek became its own pretoken, fragmenting `bod_Tibt` and `dzo_Tibt` 1.5–1.7× vs Apertus on
+   FLORES.
+2. A standalone first branch `(?i:'s|'t|'re|'ve|'m|'ll|'d)` is added, so the seven canonical English
+   contraction suffixes tokenize as a unit (`don't` → `[don, 't]`) without the apostrophe attaching
+   to the preceding word.
+
+Effect on the targeted languages (PA hyb+win, tuned config, FLORES dev meanTPS):
+
+| lang     | clean-multi | plus       | apertus_capped |
+|----------|-------------|------------|----------------|
+| bod_Tibt | 80.2        | **48.2**   | 48.4           |
+| dzo_Tibt | 91.6        | **60.3**   | 60.6           |
+
+Sinotibetan family meanTPS falls 54.5 → 44.0, matching `apertus_capped` exactly. The tsek attach is
+script-specific (U+0F0B does not occur outside Tibetan-script text), so no other family is affected.
+`plus` is not in the report's current intrinsic roster; it is documented here as the step in the
+lineage that closes the Tibetan gap.
+
+#### plus2 — apostrophe attaches forward (French/Italian/Catalan elision)
+
+`plus2` makes two coupled changes vs `plus`:
+
+1. The leading character class is extended from `[ \x{0F0B}]?` to `[ \x{0F0B}\x{0027}\x{2019}]?`, so
+   ASCII apostrophe (U+0027) and right-curly quote (U+2019) attach forward to the next word.
+2. The standalone English-contractions branch (`(?i:'s|'t|'re|'ve|'m|'ll|'d)`) is removed. With
+   apostrophe in the leading class, all seven canonical contractions tokenize identically through the
+   word arms (`don't` → `[don, 't]`, `I've` → `[I, 've]`). The removed branch was splitting `'tis` and
+   `'sword` into `['t, is]` and `['s, word]`, which `plus2` leaves as single tokens.
+
+Effect on the targeted languages (PA hyb+win, tuned config, FLORES dev meanTPS):
+
+| lang     | clean-multi | plus | plus2    | apertus_capped |
+|----------|-------------|------|----------|----------------|
+| fra_Latn | 43.6        | 43.6 | **42.9** | 42.9           |
+| ita_Latn | 41.5        | 41.5 | **41.3** | 41.3           |
+| cat_Latn | 41.1        | 41.1 | **40.6** | 40.6           |
+
+fra/ita/cat all within 0.1% of `apertus_capped` after the change. Aggregate meanTPS is within 0.15% of
+Apertus. No other family regressed between `plus` and `plus2`.
+
+**Known asymmetries.** Single-quoted code or dialogue strings tokenize asymmetrically: the opening `'`
+glues to the first inner word, the closing `'` stays a separate token. Curly-quote pairs (`'hello'`)
+keep both quotes standalone. Languages where apostrophe is letter-internal (Wolof, Hausa, some Bantu
+Latin orthographies; Pinyin `Xi'an`) split at every apostrophe. These are the same behaviours
+`apertus_capped` exhibits.
+
+**Not closed by plus2.** The 7.8% aggregate code-density gap vs Apertus (`starcoder_sample`) persists.
+Apertus's broader leading-char class attaches underscores, dots, hyphens, slashes, and brackets to
+following identifiers (`self.x` → `[self, .x]`), which the clean-multi family does not. Closing the
+code gap would require abandoning the "punctuation never attaches" principle.
+
+#### plus3 — apostrophe attaches backward (Maltese, dialect, math primes)
+
+`plus3` appends a guarded trailing apostrophe attach to each word arm:
+
+```
+(?:[\x{0027}\x{2019}](?!\p{L}))?
+```
+
+ASCII apostrophe (U+0027) and right-curly quote (U+2019) now attach *backward* to the preceding word
+as well as forward (forward attach is inherited from `plus2`). The `(?!\p{L})` guard ensures the
+trailing match never steals from a following English contraction or French elision.
+
+Target patterns:
+
+| input     | plus2 split    | plus3 split  | reason                                            |
+|-----------|----------------|--------------|---------------------------------------------------|
+| `ta'`     | `[ta, ']`      | `[ta']`      | Maltese: definite-article / preposition morpheme  |
+| `gh'`     | `[gh, ']`      | `[gh']`      | Maltese: digraph + morpheme                       |
+| `talkin'` | `[talkin, ']`  | `[talkin']`  | English dialect g-dropping                        |
+| `f'`      | `[f, ']`       | `[f']`       | math: derivative / prime notation                 |
+
+The `(?!\p{L})` guard preserves the `plus2` behaviour on `don't` and `l'eau`: `don't` → `[don, 't]`,
+`l'eau` → `[l, 'eau]`. Verified on the canonical English-contraction and French-elision test corpus
+with no regressions.
+
+Per-language downstream numbers (PA hyb+win, `_tuned` config) are pending: the `_tuned` plus3 runs
+(SLURM 2462027 / 2462028) are in flight at time of writing. The report's roster includes
+`PA-Clean-plus3-cap-hw-cv2` and `PA-Clean-plus3-cap-cv2`, which use the `consv2` parity data-weighting
+config and are therefore not directly comparable to `plus` / `plus2` on the per-language axis
+(`consv2` shifts family weights independent of the pretokenizer).
+
+**Known asymmetries (additional to `plus2`).** Under `plus3`, the closing `'` of a single-quoted code
+or dialogue string now glues to the last inner word (vs being a separate token under `plus2`). For
+curly-quote pairs `'hello'`, `plus3` attaches the right curly to the last inner word, while
+`apertus_capped` instead attaches the left curly to the first inner word; neither variant is fully
+symmetric. The letter-internal-apostrophe behaviour (Wolof / Hausa / Pinyin) is unchanged from `plus2`.
+
+### Open axes
+
+The selection within the clean-multi family is not finalized. Four axes remain open.
+
+- **Which pretokenizer.** `clean-multi` (capped) is the baseline; `plus2` closes the
+  French/Italian/Catalan elision gap; `plus3` targets Maltese morphemes, English dialect, and math
+  primes. Downstream LM training for the `_tuned` `plus3` runs is the next signal expected.
+- **Parity-config.** Independent of the regex choice, the data-side parity config is itself under
+  review (`tuned` vs `consv2` vs `modv2`; documented in `~/pa_tokenizers_branch/TOKENIZER_TRAINING.md`).
+  Headline intrinsics differ noticeably between configs at fixed pretokenizer: in `results/REPORT.md`,
+  `PA-Clean-plus3-cap-hw-cv2` and `PA-Clean-plus3-cap-cv2` (same `plus3` regex, same `consv2`,
+  differing only on hybrid-window vs base) have meanTPS 0.0233 vs 0.0217 and Gini 0.087 vs 0.095.
+- **Hybrid-window vs base parity.** Orthogonal to the regex choice. The base-parity `plus3-cv2`
+  variant scores higher AST alignment (0.728 vs 0.688) but loses multilingual compression. Selection
+  depends on downstream evidence.
+- **Tolerance for the apostrophe-attach asymmetries.** `plus2` and `plus3` introduce asymmetric
+  tokenization of opening vs closing single quotes (code / dialogue strings) and asymmetric handling
+  of curly-quote pairs. These are documented at each variant's subsection and match `apertus_capped`'s
+  behaviour. If they materially affect downstream evaluation, the lineage can be re-evaluated.
+
+## Training data
+
+The current candidate tokenizers (PA-BPE and SuperBPE) train on a single corpus mixture defined in
+`~/pa_tokenizers_branch/configs/parity_aware_config_grouped_fineweb2full_quota_tuned.json` (and the
+sibling v6 variants discussed under [Algorithms](#algorithms)). Twenty-five input groups:
+
+- **22 multilingual family groups** (austroasiatic, austronesian, baltic, berber, celtic, cushitic,
+  dravidian, germanic, indoaryan, iranian, isolates_and_singletons, mande, nigercongo_bantu,
+  nigercongo_other, nigercongo_voltaniger, romance, semitic, sinotibetan, slavic, taikadai, turkic,
+  uralic) drawn from per-language FineWeb2 parquets.
+- **English** — 50 FineWeb CC-MAIN shards.
+- **Code** — 87 per-language StarCoder shards (Python, JavaScript, Java, …).
+- **Math** — InfiMath + FineMath samples.
+
+Per-family data volume is governed by a `quota_bytes` budget in the config. Two languages were
+dropped after a data-quality audit (`~/pa_tokenizers_branch/RESULTS.md §11.2`): `kas_Deva`
+(Devanagari-Kashmiri, script purity 0.59) and `lij_Latn` (Ligurian, 68% duplicate lines). Full
+provenance, group composition, and the quota mechanics are in
+`~/pa_tokenizers_branch/TOKENIZER_TRAINING.md §6` and `§9`. The per-family `ratio` weights that bias
+the PA-BPE trainer's merge selection are a separate design axis, discussed under
+[Algorithms](#algorithms).
+
+## Algorithms
+
+The candidate roster covers four training algorithms, all run on byte-level token streams:
+
+- **Plain BPE.** Hugging Face `tokenizers` `BpeTrainer`. Baseline reference; not a candidate.
+- **Parity-aware BPE.** A custom `ParityBpeTrainer` (in `~/pa_tokenizers_branch`) that biases merge
+  selection by per-group encoding cost, so low-resource languages receive proportionally more merges
+  than under plain BPE. Two operating modes:
+  - **base** — pure parity-driven merging from the start.
+  - **hybrid+window** — a `global_merges = 64_000` warmup phase under a moving window
+    (W=100, α=2) precedes the parity phase. This is the production target for the `PA-Clean-*` and
+    `PA-Apertus-*` candidates.
+
+  The per-family `ratio` values that bias merge selection are themselves a design axis. Three
+  configs are under consideration:
+  - **`tuned`** (v5; `~/pa_tokenizers_branch/TOKENIZER_TRAINING.md §9`) — hand-tuned. European
+    family ratios ×1.2; two data-quality failures (`kas_Deva`, `lij_Latn`) dropped; script-mismatched
+    languages (`ydd_Hebr`, three Arabic-script entries) regrouped into `semitic`. Used by
+    `PA-Clean-capped`, `PA-Clean-plus2-capped`, and the other `_tuned` candidates in the report.
+  - **`consv2`** and **`modv2`** (v6; `~/pa_tokenizers_branch/VOCAB_FILTERING_PLAN.md §8`) — replace
+    hand-tuning with a principled formula
+    `ratio = 1.0 + (baseline − 1.0) · max(f_data, f_speakers)` over per-family data volume
+    (FineWeb2 GB) and speaker count. `consv2` (D_REF=10 GB, S_REF=50 M, taikadai_cap=2.0) changes
+    three families; `modv2` (D_REF=50 GB, S_REF=200 M, taikadai_cap=1.75) changes eight. The
+    report's `PA-Clean-plus3-cap-hw-cv2` and `PA-Clean-plus3-cap-cv2` rows are trained under
+    `consv2`.
+
+  Selection between `tuned`, `consv2`, and `modv2` is one of the open axes in
+  [Pretokenization → Open axes](#open-axes); it is independent of the pretokenizer choice.
+- **SuperBPE.** A two-stage extension. Stage 1 is plain or parity-aware BPE under the pretokenizer
+  above. Stage 2 replays the stage-1 merges and continues BPE under a coarser pretokenizer that
+  drops word boundaries, allowing cross-word "superwords" to form (`theĠcat`, `defĠmain`). Used by
+  the `SuperBPE-clean-*` and `SuperBPE-apertus-*` candidates. Stage-2 regex requirements are in
+  `~/superbpe/REGEX_PRESETS.md`.
+- **Unigram LM.** SentencePiece-style. Included only as a comparison reference (`Unigram-gpt4o`),
+  not a candidate.
+
+> Additional experimental algorithms are in the works; they will be documented here once their
+> evaluation is complete.
+
+## Special tokens (Apertus v1)
 
 Here is a summary of the tokens that were added to/removed from Apertus on top of the Mistral-Nemo tokenizer. 
 
-## 1. Chat Template Token: `[INST]`
+### 1. Chat Template Token: `[INST]`
 
 | | Apertus | Mistral-Nemo |
 |---|---|---|
@@ -423,7 +635,7 @@ Mistral-Nemo follows the classic Mistral v0.1/v0.2/v0.3 instruction format. Aper
 
 ---
 
-## 2. `<pad>` Token Placement
+### 2. `<pad>` Token Placement
 
 | | Apertus | Mistral-Nemo |
 |---|---|---|
@@ -433,7 +645,7 @@ Apertus reclaims the slot freed by removing `[INST]` and places `<pad>` there.
 
 ---
 
-## 3. LaTeX Shortcut Tokens (Non-Special)
+### 3. LaTeX Shortcut Tokens (Non-Special)
 
 Apertus adds four **non-special** added tokens for common LaTeX commands. These are the only tokens in either file marked `special=False`, meaning they participate in normal tokenization.
 
@@ -446,11 +658,11 @@ Apertus adds four **non-special** added tokens for common LaTeX commands. These 
 
 ---
 
-## 4. Domain-Specific Special Tokens (IDs 18–72)
+### 4. Domain-Specific Special Tokens (IDs 18–72)
 
 Apertus defines **55 special tokens** across several domains. These use the `<SPECIAL_N>` token placeholders set aside (for exactly this use case) in the Mistral-Nemo tokenizer.
 
-### Code & Git (IDs 18–31)
+#### Code & Git (IDs 18–31)
 
 StarCoder / The Stack–style tokens for structured code pretraining:
 
@@ -460,7 +672,7 @@ StarCoder / The Stack–style tokens for structured code pretraining:
 | 23–27 | `<jupyter_start>`, `<jupyter_text>`, `<jupyter_code>`, `<jupyter_output>`, `<empty_output>` |
 | 28–31 | `<commit_before>`, `<commit_msg>`, `<commit_after>`, `<reponame>` |
 
-### Reasoning (IDs 32–35)
+#### Reasoning (IDs 32–35)
 
 Chain-of-thought / reasoning-mode generation:
 
@@ -469,7 +681,7 @@ Chain-of-thought / reasoning-mode generation:
 | 32–33 | `<think>`, `</think>` |
 | 34–35 | `<answer>`, `</answer>` |
 
-### PII Masking (IDs 36–38)
+#### PII Masking (IDs 36–38)
 
 For training data decontamination:
 
@@ -479,7 +691,7 @@ For training data decontamination:
 | 37 | `<email-pii>` |
 | 38 | `<ip-pii>` |
 
-### File & Code Translation (IDs 39–41)
+#### File & Code Translation (IDs 39–41)
 
 | ID | Token |
 |---|---|
@@ -487,7 +699,7 @@ For training data decontamination:
 | 40 | `<code_to_intermediate>` |
 | 41 | `<intermediate_to_code>` |
 
-### Pull Request Schema (IDs 42–57)
+#### Pull Request Schema (IDs 42–57)
 
 A full 16-token schema for structured PR pretraining:
 
@@ -497,7 +709,7 @@ A full 16-token schema for structured PR pretraining:
 | 47–51 | `<pr_base_code>`, `<pr_diff>`, `<pr_diff_hunk>`, `<pr_comment>`, `<pr_event_id>` |
 | 52–57 | `<pr_review>`, `<pr_review_state>`, `<pr_review_comment>`, `<pr_in_reply_to_review_id>`, `<pr_in_reply_to_comment_id>`, `<pr_diff_hunk_comment_line>` |
 
-### Fill-in-the-Middle (IDs 58–60)
+#### Fill-in-the-Middle (IDs 58–60)
 
 For code infilling tasks:
 
@@ -507,7 +719,7 @@ For code infilling tasks:
 | 59 | `<\|fim_hole\|>` |
 | 60 | `<\|fim_end\|>` |
 
-### Multi-Role Chat Template (IDs 61–72)
+#### Multi-Role Chat Template (IDs 61–72)
 
 A new chat format replacing the older `[INST]`/`[/INST]` scheme:
 
