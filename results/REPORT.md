@@ -23,10 +23,10 @@ Disclaimer: Claude helped compile this report from all of my analyses. All numbe
 
 ## Recommendation
 
-I recommend PA-Clean-capped as the default. Against the current Apertus tokenizer it is fairer across languages (Gini, the inequality of per-language encoding cost, 0.081 against 0.205; lower is fairer) and encodes the multilingual text more compactly (about 0.023 against 0.0198 FLORES sentences per token), and it matches Apertus on downstream modeling quality over the training languages (FLORES bits-per-byte, trained languages, 1.169 against 1.168). It has the highest candidate math score (MC-math 0.295) and the highest candidate Python code-generation score (MBPP pass-rate 0.190); its clean-multi pretokenizer keeps math operators as separate tokens (operator-isolation 0.99).
-PA-Apertus-capped is the better fit where multilingual modeling matters more than code. It has the same fairness (Gini 0.081), but its pretokenizer merges operators with operands (operator-isolation 0.50), which lowers code generation (MBPP 0.058, below the clean-multi candidates at p_BH<0.001).
-SuperBPE-clean-cap-hw encodes English most compactly (5.01 bytes per token, against 4.24 for PA-Clean-capped), and its downstream quality is now measured: Val BPB 0.732 (against 0.729 for PA-Clean-capped), FLORES bits-per-byte over the trained languages 1.161, and MBPP pass-rate 0.196. It is less fair (Gini 0.106 against 0.081), which is the main reason it is not the default.
-For some use cases, the cost is a little English compression: the parity-aware candidates encode English at 4.24–4.34 bytes per token, against Apertus's 4.60. On math and code the candidates are ahead of Apertus: PA-Clean-capped has MC-math 0.295 (against Apertus's 0.257) and MBPP pass-rate 0.190 (against 0.000).
+I recommend **CleanV3-pretok + PA-BPE (rebalanced data)** as the headline tokenizer. Against the production Apertus v1 tokenizer it is fairer across languages (Gini, the inequality of per-language encoding cost, 0.087 against 0.205 on FLORES60 and 0.098 against 0.313 on FLORES205; lower is fairer), encodes the full 205-language FLORES set more compactly (sent/tok 0.0204 against 0.0142), and uses 85% of its vocabulary against Apertus's 64%. It matches Apertus on downstream per-byte fit on the training languages (FLORES bits-per-byte 1.170 against 1.168, tied within CI; Val BPB 0.729 against 0.720) and respects code syntax noticeably better (AST boundary alignment 0.688 against 0.488; operator-isolation 0.99 against 0.50).
+MBPP and MC-math have not been measured directly on this tokenizer — its `-mathcode-scratch` LM has not been trained. The closest measured PA-BPE candidate, `CleanV2-pretok + PA-BPE` (which differs from the headline on the pretokenizer V2/V3 axis and the data-config axis but tracks within sampling noise on every other measured metric — Val BPB, FLORES BPB, AST alignment, code BPB, FineWeb-Edu B/tok), achieves MBPP 0.200 [0.156, 0.236] against Apertus's 0.000 [0.000, 0.000] (paired-bootstrap p_BH = 3×10⁻⁴) and MC-math 0.311 against Apertus's 0.257 (Wilson 95% CIs [0.288, 0.335] vs [0.235, 0.279], barely overlapping). The headline's MBPP / MC-math are expected to track these, pending direct measurement.
+The cost vs Apertus is concentrated on English compression and per-byte fit. FineWeb-Edu English: 4.261 B/tok against Apertus's 4.595 (Apertus 7.8% denser). eng_Latn sent/tok on FLORES60: 0.0355 against 0.0377 (Apertus 6.0% denser). Val BPB is 0.009 higher.
+Reference rows in the candidate table below each isolate one axis of the design decision: `CleanV2-pretok + PA-BPE` (V2/V3 + tuned/rebalanced; cited above as the MBPP/MC-math proxy), `Apertus-pretok + PA-BPE` (pretokenizer axis — same algorithm + data, only the regex differs; MBPP 0.058), `Apertus-pretok + PA-BPE (untuned data)` (data-config axis within Apertus-pretok), `CleanV1-pretok + PA-BPE + SuperBPE` (SuperBPE algorithm-axis), and `CleanV3-pretok + plain BPE` (plain-BPE algorithm-axis control at fixed pretokenizer).
 Disqualified by a production-safety fail: Gemma 3, EuroLLM (see *Production-safety gates*).
 
 ## Metric guide
@@ -48,13 +48,13 @@ The recommended tokenizers and the current Apertus production baseline, on the d
 
 | Tokenizer | Role | Multiling. sent/tok ↑ | Gini ↓ | Vocab-util CoV ↓ | Avg langs/token ↑ | Eng B/tok ↑ | Vocab util ↑ | AST align ↑ | Val BPB ↓ | FLORES BPB (trained) [95% CI] ↓ | FLORES BPB σ (trained) ↓ | MC-math ↑ | MBPP ↑ [95% CI] | Gate |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| CleanV1-pretok + PA-BPE | default | 0.0232 | 0.081 | 0.4138 | 2.79 | 4.24 | 0.605 | 0.686 | 0.729 | 1.169 [1.061, 1.277] | 0.306 | 0.295 | 0.190 [0.156, 0.226] | warn |
-| CleanV2-pretok + PA-BPE | provisional | 0.0233 | 0.081 | 0.4132 | 2.79 | 4.26 | 0.607 | 0.686 | 0.729 | 1.171 [1.063, 1.278] | 0.307 | 0.311 | 0.200 [0.166, 0.236] | warn |
-| CleanV3-pretok + PA-BPE (rebalanced data) | provisional | 0.0233 | 0.087 | 0.4212 | 2.74 | 4.26 | 0.625 | 0.688 | 0.729 | pending | pending | — | — | warn |
-| CleanV3-pretok + PA-BPE (base parity, rebalanced data) | provisional | 0.0217 | 0.095 | 0.4352 | 2.79 | 3.18 | 0.559 | 0.728 | — | — | — | — | — | warn |
-| Apertus-pretok + PA-BPE | conditional | 0.0233 | 0.081 | 0.4130 | 2.79 | 4.34 | 0.606 | 0.551 | 0.729 | 1.170 [1.064, 1.277] | 0.303 | 0.270 | 0.058 [0.038, 0.080] | warn |
-| CleanV1-pretok + PA-BPE + SuperBPE | conditional | 0.0227 | 0.106 | 0.4892 | 3.02 | 5.01 | 0.550 | 0.641 | 0.732 | 1.161 [1.056, 1.266] | 0.299 | 0.268 | 0.196 [0.162, 0.230] | warn |
-| Apertus v1 (production) | baseline | 0.0198 | 0.205 | 0.5133 | 2.86 | 4.60 | 0.561 | 0.488 | 0.720 | 1.168 [1.063, 1.272] | 0.297 | 0.257 | 0.000 [0.000, 0.000] | warn |
+| CleanV3-pretok + PA-BPE (rebalanced data) | headline | 0.0233 | 0.087 | 0.4212 | 2.74 | 4.26 | 0.625 | 0.688 | 0.729 | 1.170 [1.063, 1.277] | 0.304 | — | — | warn |
+| CleanV2-pretok + PA-BPE | ref: closest measured PA-BPE peer (cites MBPP / MC-math) | 0.0233 | 0.081 | 0.4132 | 2.79 | 4.26 | 0.607 | 0.686 | 0.729 | 1.171 [1.063, 1.278] | 0.307 | 0.311 | 0.200 [0.166, 0.236] | warn |
+| Apertus-pretok + PA-BPE | ref: pretokenizer-axis foil | 0.0233 | 0.081 | 0.4130 | 2.79 | 4.34 | 0.606 | 0.551 | 0.729 | 1.170 [1.064, 1.277] | 0.303 | 0.270 | 0.058 [0.038, 0.080] | warn |
+| Apertus-pretok + PA-BPE (untuned data) | ref: data-axis foil (untuned) | 0.0233 | 0.075 | 0.3860 | 2.84 | 4.33 | 0.592 | 0.551 | — | — | — | — | — | warn |
+| CleanV1-pretok + PA-BPE + SuperBPE | ref: SuperBPE algorithm-axis | 0.0227 | 0.106 | 0.4892 | 3.02 | 5.01 | 0.550 | 0.641 | 0.732 | 1.161 [1.056, 1.266] | 0.299 | 0.268 | 0.196 [0.162, 0.230] | warn |
+| CleanV3-pretok + plain BPE | ref: plain-BPE algorithm-axis control | 0.0228 | 0.114 | 0.4918 | 2.83 | 4.45 | 0.615 | 0.683 | — | — | — | — | — | warn |
+| Apertus v1 (production) | comparator (production) | 0.0198 | 0.205 | 0.5133 | 2.86 | 4.60 | 0.561 | 0.488 | 0.720 | 1.168 [1.063, 1.272] | 0.297 | 0.257 | 0.000 [0.000, 0.000] | warn |
 
 `warn` is advisory: for NFC tokenizers exact-match below 1.0 is canonical re-spelling, not loss. MBPP has a paired-bootstrap 95% CI; MC-math is a single run.
 
@@ -282,7 +282,7 @@ Small transformers trained from scratch on each tokenizer (companion `tokenizer-
 | Apertus-pretok + PA-BPE [matched] | 0.729 | 2.943 [2.793, 3.093] | 1.119 | 1.170 [1.064, 1.277] | 0.303 | 0.531 | 0.819 | 0.916 | 0.015 | 0.270 | 0.240 | 0.049 | 0.058 |
 | CleanV1-pretok + PA-BPE [matched] | 0.729 | 2.965 [2.812, 3.118] | 1.141 | 1.169 [1.061, 1.277] | 0.306 | 0.533 | 0.816 | 0.919 | 0.013 | 0.295 | 0.232 | 0.055 | 0.190 |
 | CleanV2-pretok + PA-BPE [matched] | 0.729 | 2.953 [2.801, 3.104] | 1.129 | 1.171 [1.063, 1.278] | 0.307 | 0.534 | 0.819 | 0.920 | 0.012 | 0.311 | 0.226 | 0.043 | 0.200 |
-| CleanV3-pretok + PA-BPE (rebalanced data) [matched] | 0.729 | pending | pending | pending | pending | pending | pending | pending | pending | — | — | — | — |
+| CleanV3-pretok + PA-BPE (rebalanced data) [matched] | 0.729 | 2.979 [2.825, 3.133] | 1.151 | 1.170 [1.063, 1.277] | 0.304 | 0.534 | 0.824 | 0.917 | 0.015 | — | — | — | — |
 | Apertus-pretok + PA-BPE + SuperBPE [matched] | 0.733 | 3.081 [2.920, 3.241] | 1.198 | 1.176 [1.069, 1.283] | 0.304 | 0.541 | 0.815 | 0.912 | 0.011 | 0.269 | 0.198 | 0.055 | 0.004 |
 | CleanV1-pretok + PA-BPE + SuperBPE [matched] | 0.732 | 3.038 [2.879, 3.197] | 1.188 | 1.161 [1.056, 1.266] | 0.299 | 0.536 | 0.814 | 0.920 | 0.010 | 0.268 | 0.222 | 0.073 | 0.196 |
 | Apertus v1 (production) [matched] | 0.720 | 2.768 [2.632, 2.904] | 1.015 | 1.168 [1.063, 1.272] | 0.297 | 0.526 | 0.819 | 0.914 | 0.012 | 0.257 | 0.228 | 0.030 | 0.000 |
