@@ -122,6 +122,13 @@ Thresholds (all corpus-invariant): rate `1` and `5 per million`, survival `0.1`.
 | BPE-Punct | 0.800 | 9.4 | 17.8 | 54.7 | 18.1 | 3.59 |
 | SuperBPE on CleanV3-pretok (t110k/v130k) | 0.922 | 20.8 | 34.7 | 37.7 | 6.8 | 2.60 |
 | CleanV3-pretok + plain BPE | 0.928 | 17.3 | 32.4 | 44.1 | 6.3 | 2.48 |
+| SuperBPE-plus2-cv2-t110k | 0.924 | 20.7 | 34.9 | 37.8 | 6.6 | 2.59 |
+| SuperBPE-plus2v2-cv2-t110k | 0.926 | 18.8 | 35.8 | 39.0 | 6.4 | 2.71 |
+| PA-Clean-plus3-A8 | 0.920 | 16.8 | 32.0 | 44.4 | 6.9 | 2.87 |
+| PA-Clean-plus3-A7 | 0.918 | 16.7 | 31.7 | 44.6 | 7.0 | 2.97 |
+| PA-Clean-plus3-repcap8fr-cv2 | 0.911 | 16.4 | 30.1 | 45.9 | 7.6 | 3.04 |
+| PA-Clean-plus3-repcap8fr-A8 | 0.920 | 16.8 | 31.9 | 44.4 | 6.9 | 2.88 |
+| BPE-plus3-repcap8 | 0.913 | 16.9 | 31.5 | 44.0 | 7.6 | 2.55 |
 
 *Composition note: of Scaffold, the byte-fragment (incomplete-UTF-8 sub-character) share is 0.24–0.79 pp of vocab across tokenizers; the rest are subword stepping-stones. Byte-fragments are not special-cased; they fall in Scaffold only when they behave like merge steps.*
 

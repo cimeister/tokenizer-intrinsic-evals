@@ -52,13 +52,13 @@ The recommended tokenizers and the current Apertus production baseline, on the d
 | CleanV2-pretok + PA-BPE | ref: closest measured PA-BPE peer (cites MBPP / MC-math) | 0.0233 | 0.081 | 0.4132 | 2.79 | 4.26 | 0.607 | 0.686 | 0.729 | 1.171 [1.063, 1.278] | 0.307 | 0.311 | 0.200 [0.166, 0.236] | warn |
 | Apertus-pretok + PA-BPE | ref: pretokenizer-axis foil | 0.0233 | 0.081 | 0.4130 | 2.79 | 4.34 | 0.606 | 0.551 | 0.729 | 1.170 [1.064, 1.277] | 0.303 | 0.270 | 0.058 [0.038, 0.080] | warn |
 | Apertus-pretok + PA-BPE (untuned data) | ref: data-axis foil (untuned) | 0.0233 | 0.075 | 0.3860 | 2.84 | 4.33 | 0.592 | 0.551 | — | — | — | — | — | warn |
-| CleanV1-pretok + PA-BPE + SuperBPE | ref: SuperBPE algorithm-axis | 0.0227 | 0.106 | 0.4892 | 3.02 | 5.01 | 0.550 | 0.641 | 0.732 | 1.161 [1.056, 1.266] | 0.299 | 0.268 | 0.196 [0.162, 0.230] | warn |
+| CleanV1-pretok + PA-BPE + SuperBPE | ref: SuperBPE algorithm-axis | 0.0227 | 0.106 | 0.4892 | 3.02 | 5.01 | 0.550 | 0.641 | 0.732 | 1.161 [1.056, 1.266] | 0.299 | 0.268 | 0.196 [0.162, 0.232] | warn |
 | CleanV3-pretok + plain BPE | ref: plain-BPE algorithm-axis control | 0.0228 | 0.114 | 0.4918 | 2.83 | 4.45 | 0.615 | 0.683 | — | — | — | — | — | warn |
 | Apertus v1 (production) | comparator (production) | 0.0198 | 0.205 | 0.5133 | 2.86 | 4.60 | 0.561 | 0.488 | 0.720 | 1.168 [1.063, 1.272] | 0.297 | 0.257 | 0.000 [0.000, 0.000] | warn |
 
 `warn` is advisory: for NFC tokenizers exact-match below 1.0 is canonical re-spelling, not loss. MBPP has a paired-bootstrap 95% CI; MC-math is a single run.
 
-Across the 10 tokenizers with both numbers, Spearman ρ(AST align, MBPP) = +0.721 (p = 0.019). AST alignment is on StarCoder snippets (multi-language); MBPP is Python pass-rate at 1B tokens, so the relationship is indicative, not a guarantee.
+Across the 11 tokenizers with both numbers, Spearman ρ(AST align, MBPP) = +0.718 (p = 0.013). AST alignment is on StarCoder snippets (multi-language); MBPP is Python pass-rate at 1B tokens, so the relationship is indicative, not a guarantee.
 
 ### Candidates and references across FLORES sets
 
@@ -293,6 +293,9 @@ Small transformers trained from scratch on each tokenizer (companion `tokenizer-
 | BPE-gpt4o-balanced-NFC [matched] | 0.711 | 2.637 [2.500, 2.774] | 1.022 | 1.154 [1.049, 1.259] | 0.297 | 0.519 | 0.813 | 0.916 | 0.011 | — | — | — | — |
 | BPE-rightalign [matched] | 0.712 | 2.644 [2.508, 2.780] | 1.016 | 1.160 [1.057, 1.264] | 0.293 | 0.519 | 0.816 | 0.912 | 0.012 | 0.295 | 0.252 | 0.061 | 0.062 |
 | PA-Clean-balanced-hw [matched] | pending | pending | pending | pending | pending | pending | pending | pending | pending | — | — | — | — |
+| PA-Clean-plus2-A8 [matched] | 0.726 | 2.989 [2.836, 3.142] | 1.140 | 1.165 [1.058, 1.271] | 0.302 | 0.528 | 0.819 | 0.915 | pending | — | — | — | — |
+| PA-Clean-plus3-A6 [matched] | 0.728 | 2.975 [2.824, 3.127] | 1.129 | 1.166 [1.059, 1.273] | 0.303 | 0.529 | 0.821 | 0.909 | pending | — | — | — | — |
+| PA-Clean-plus3-A8 [matched] | 0.726 | 2.964 [2.815, 3.113] | 1.114 | 1.165 [1.058, 1.271] | 0.302 | 0.529 | 0.813 | 0.910 | pending | 0.312 | 0.222 | 0.110 | 0.168 |
 | PA-Clean-uncapped [matched] | 0.728 | 2.966 [2.812, 3.119] | 1.146 | 1.167 [1.061, 1.274] | 0.303 | 0.529 | 0.818 | 0.917 | 0.009 | — | — | — | — |
 | PA-gpt4-balanced [matched] | 0.719 | 2.662 [2.527, 2.797] | 1.007 | 1.177 [1.071, 1.282] | 0.300 | 0.524 | 0.816 | 0.914 | 0.011 | — | — | — | — |
 | PA-gpt4-fineweb2full [matched] | 0.728 | 2.962 [2.808, 3.116] | 1.147 | 1.169 [1.062, 1.275] | 0.303 | 0.531 | 0.827 | 0.914 | 0.012 | — | — | — | — |
@@ -303,6 +306,7 @@ Small transformers trained from scratch on each tokenizer (companion `tokenizer-
 | SuperBPE(PA-base)·gpt4o·t64k [matched] | 0.729 | 2.658 [2.523, 2.794] | 1.012 | 1.180 [1.076, 1.284] | 0.295 | 0.530 | 0.792 | 0.920 | 0.006 | — | — | — | — |
 | SuperBPE(PA-base)·gpt4o·t90k [matched] | 0.729 | 2.659 [2.523, 2.794] | 1.008 | 1.181 [1.077, 1.284] | 0.294 | 0.528 | 0.801 | 0.916 | 0.006 | — | — | — | — |
 | SuperBPE(plain-base)·gpt4o·noNFC [matched] | 0.724 | 2.645 [2.510, 2.781] | 1.012 | 1.173 [1.069, 1.278] | 0.297 | 0.525 | 0.804 | 0.909 | 0.004 | — | — | — | — |
+| SuperBPE-plus2v2-cv2-t110k [matched] | 0.732 | 3.065 [2.903, 3.227] | 1.210 | 1.163 [1.058, 1.268] | 0.300 | 0.535 | 0.818 | 0.912 | pending | — | — | — | — |
 | Unigram-gpt4o [matched] | 0.731 | 2.686 [2.551, 2.821] | 1.008 | 1.190 [1.084, 1.297] | 0.303 | 0.554 | 0.833 | 0.911 | 0.015 | — | — | — | — |
 
 **10B vs 20B stability (balanced mixture).** Five tokenizers continued from their 10B checkpoint for +10B on the same data. BPB ↓ better; BLiMP/GSM8K/HumanEval/MBPP/MGSM ↑ better. This is the justification for reporting most runs at 10B: **BPB/code-BPB rankings are budget-stable, generative-task rankings are not** (single runs, no CIs). BLiMP is Option-B (BOS) scoring; the 20B *-continue* runs have no Option-B eval, shown `—`.

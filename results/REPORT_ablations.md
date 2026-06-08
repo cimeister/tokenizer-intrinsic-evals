@@ -81,7 +81,7 @@ Adding the SuperBPE stage raises Eng B/tok by 18–25% (clean: 4.24 to 5.01; ape
 | Apertus-pretok + PA-BPE [matched] | 0.729 | 2.943 | 0.531 | 0.270 | 0.058 [0.038, 0.080] |
 | Apertus-pretok + PA-BPE + SuperBPE [matched] | 0.733 | 3.081 | 0.541 | 0.269 | 0.004 [0.000, 0.010] |
 | CleanV1-pretok + PA-BPE [matched] | 0.729 | 2.965 | 0.533 | 0.295 | 0.190 [0.156, 0.226] |
-| CleanV1-pretok + PA-BPE + SuperBPE [matched] | 0.732 | 3.038 | 0.536 | 0.268 | 0.196 [0.162, 0.230] |
+| CleanV1-pretok + PA-BPE + SuperBPE [matched] | 0.732 | 3.038 | 0.536 | 0.268 | 0.196 [0.162, 0.232] |
 
 ### Pretokenizer family (apertus vs clean-multi vs gpt4)
 
@@ -161,7 +161,7 @@ The transition (90k to 110k) and the final vocab (128k to 130k) change together,
 *Extrinsic (downstream LM):*
 | Tokenizer | Val BPB ↓ | FLORES BPB ↓ | Code BPB ↓ | MC-math ↑ | MBPP ↑ [95% CI] |
 |---|---|---|---|---|---|
-| CleanV1-pretok + PA-BPE + SuperBPE [matched] | 0.732 | 3.038 | 0.536 | 0.268 | 0.196 [0.162, 0.230] |
+| CleanV1-pretok + PA-BPE + SuperBPE [matched] | 0.732 | 3.038 | 0.536 | 0.268 | 0.196 [0.162, 0.232] |
 | SuperBPE·clean-cap·hw·fw2full·t110k/130k [matched] | 0.732 | 2.993 | 0.534 | 0.288 | 0.202 [0.168, 0.238] |
 
 **Further ablations.** Additional design points, reported in full under *Appendix — additional ablations*:
@@ -331,7 +331,7 @@ This ablation compares the hybrid-window parity rule against base parity across 
 | Tokenizer | Val BPB ↓ | FLORES BPB ↓ | Code BPB ↓ | MC-math ↑ | MBPP ↑ [95% CI] |
 |---|---|---|---|---|---|
 | Apertus-pretok + PA-BPE + SuperBPE [matched] | 0.733 | 3.081 | 0.541 | 0.269 | 0.004 [0.000, 0.010] |
-| CleanV1-pretok + PA-BPE + SuperBPE [matched] | 0.732 | 3.038 | 0.536 | 0.268 | 0.196 [0.162, 0.230] |
+| CleanV1-pretok + PA-BPE + SuperBPE [matched] | 0.732 | 3.038 | 0.536 | 0.268 | 0.196 [0.162, 0.232] |
 | SuperBPE·gpt4·hw·fw2full [matched] | pending | pending | pending | 0.265 | 0.070 [0.048, 0.092] |
 
 ### Algorithm / pretok (plain BPE vs Unigram, right-align digits, gpt2-style)
