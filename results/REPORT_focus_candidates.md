@@ -2,13 +2,13 @@
 
 *([← back to REPORT.md](REPORT.md))*
 
-Five-way comparison between the two new candidate tokenizers (**multi-focus** and **english-focus**), the production baseline (**Apertus v1**), the closest matched **plain BPE** control, and **Gemma 3** as an external open-source reference.
+Five-way comparison between the two new candidate tokenizers (**multi-focus** and **english-focus**), the current tokenizer (**Apertus v1**), a **plain BPE** control, and **Gemma 3** as an external open-source reference.
 
 **multi-focus** uses hybrid PA-BPE, with global merges for the first 64k merges. It also keeps the original family-balanced data weighting, computed using the FLORES dataset. **english-focus** uses hybrid PA-BPE, with global merges for the first 90k merges. It decreases the weights of six small families to neutral w.r.t. English. All other axes (pretokenizer base, normalizer (NFC), overall training data, special-token reservation, vocabulary target) are matched between the two.
 
-As a fair warning: extrinsic results for the custome tokenizers are from models trained on 128k variants of the tokenizers, as final vocab size wasn't known when running the experiments. 
+As a fair warning: extrinsic results for the custom tokenizers are from models trained on 128k variants of the tokenizers, as final vocab size wasn't known when running the experiments. Consequently, they're marked as [proxy] 
 
-Compression values in the four compression cells of §1 show `(ΔApertus)` values. Higher tok/char and higher bytes/token are better.
+Compression values in the four compression cells of §1 show `(% diff vs Apertus)`. Higher tok/char and higher bytes/token are better.
 
 
 ## 1. Compression — four corpora
@@ -18,12 +18,12 @@ Compression values in the four compression cells of §1 show `(ΔApertus)` value
 | Tokenizer | FLORES60 (tok/char) ↑ | FLORES200 (tok/char) ↑ | FineWeb-Edu English (b/t) ↑ | FineWeb2-proportional (b/t) ↑ |
 |---|---|---|---|---|
 | Apertus v1 | 0.0198 | 0.0142 | 4.595 | 3.061 |
-| multi-focus | 0.0234 (+0.0036) | 0.0204 (+0.0062) | 4.333 (−0.262) | 3.781 (+0.720) |
-| english-focus | 0.0232 (+0.0034) | 0.0204 (+0.0062) | 4.426 (−0.169) | 3.807 (+0.746) |
-| plain BPE | 0.0227 (+0.0029) | 0.0200 (+0.0058) | 4.512 (−0.083) | 3.823 (+0.762) |
-| Gemma 3 | **0.0244** (+0.0046) | 0.0193 (+0.0051) | **4.636** (+0.041) | 3.658 (+0.597) |
+| multi-focus | 0.0234 (+18.2%) | 0.0204 (+43.7%) | 4.333 (−5.7%) | 3.781 (+23.5%) |
+| english-focus | 0.0232 (+17.2%) | 0.0204 (+43.7%) | 4.426 (−3.7%) | 3.807 (+24.4%) |
+| plain BPE | 0.0227 (+14.6%) | 0.0200 (+40.8%) | 4.512 (−1.8%) | 3.823 (+24.9%) |
+| Gemma 3 | **0.0244** (+23.2%) | 0.0193 (+35.9%) | **4.636** (+0.9%) | 3.658 (+19.5%) |
 
-Apertus trails every other tokenizer on FineWeb2-proportional by 0.60–0.76 bytes/token; on FineWeb-Edu English it is third. multi-focus is the only candidate that compresses English worse than Apertus (−0.262 b/t). english-focus closes most of that English gap (−0.169 b/t) by allocating more vocabulary to English.
+Apertus compresses text less than the other tokenizers in the FineWeb2-proportional setting by 0.60–0.76 bytes/token; on FineWeb-Edu English it is third. multi-focus is the only candidate that compresses English worse than Apertus (−0.262 b/t). english-focus closes most of that English gap (−0.169 b/t) by allocating more vocabulary to English.
 
 ## 2. Fairness — Gini coefficient and worst-language sequence-length factor
 
