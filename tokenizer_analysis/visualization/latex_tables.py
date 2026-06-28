@@ -149,6 +149,119 @@ class LaTeXTableGenerator:
                 'err_key': None,
                 'format': '{:.4f}',
                 'lower_is_better': False
+            },
+            # Information-theoretic
+            'bigram_entropy': {
+                'title': 'Bigram Entropy',
+                'key_path': ['bigram_entropy', 'per_tokenizer'],
+                'value_key': 'global_bigram_entropy',
+                'stat_key': None,
+                'err_key': None,
+                'format': '{:.3f}',
+                'lower_is_better': False
+            },
+            # Mathematical content
+            'three_digit_boundary_f1': {
+                'title': '3-Digit Align. F1',
+                'key_path': ['three_digit_boundary_alignment', 'summary'],
+                'value_key': 'avg_f1',
+                'stat_key': None,
+                'err_key': None,
+                'format': '{:.3f}',
+                'lower_is_better': False
+            },
+            'operator_isolation': {
+                'title': 'Op. Isolation',
+                'key_path': ['operator_isolation_rate', 'summary'],
+                'value_key': 'overall_isolation_rate',
+                'stat_key': None,
+                'err_key': None,
+                'format': '{:.3f}',
+                'lower_is_better': False
+            },
+            # Code: AST boundary alignment
+            'ast_full_alignment': {
+                'title': 'AST Align.',
+                'key_path': ['ast_boundary_alignment', 'summary'],
+                'value_key': 'avg_full_alignment_rate',
+                'stat_key': None,
+                'err_key': None,
+                'format': '{:.3f}',
+                'lower_is_better': False
+            },
+            'ident_fragmentation': {
+                'title': 'Ident. Frag.',
+                'key_path': ['identifier_fragmentation', 'summary'],
+                'value_key': 'fragmentation_rate',
+                'stat_key': None,
+                'err_key': None,
+                'format': '{:.3f}',
+                'lower_is_better': True
+            },
+            'indent_depth_corr': {
+                'title': 'Indent Depth Corr.',
+                'key_path': ['indentation_consistency', 'summary'],
+                'value_key': 'avg_depth_proportionality_correlation',
+                'stat_key': None,
+                'err_key': None,
+                'format': '{:.3f}',
+                'lower_is_better': False
+            },
+            # UTF-8 integrity
+            'utf8_boundary_crossing': {
+                'title': 'UTF-8 Bound. Cross',
+                'key_path': ['utf8_token_integrity', 'summary'],
+                'value_key': 'boundary_crossing_rate',
+                'stat_key': None,
+                'err_key': None,
+                'format': '{:.4f}',
+                'lower_is_better': True
+            },
+            'utf8_char_split': {
+                'title': 'Char Split',
+                'key_path': ['utf8_char_split', 'summary'],
+                'value_key': 'split_rate',
+                'stat_key': None,
+                'err_key': None,
+                'format': '{:.4f}',
+                'lower_is_better': True
+            },
+            # Reconstruction fidelity
+            'exact_match_rate': {
+                'title': 'Exact Match',
+                'key_path': ['reconstruction_fidelity', 'summary'],
+                'value_key': 'exact_match_rate',
+                'stat_key': None,
+                'err_key': None,
+                'format': '{:.3f}',
+                'lower_is_better': False
+            },
+            'mean_cer': {
+                'title': 'CER',
+                'key_path': ['reconstruction_fidelity', 'summary'],
+                'value_key': 'mean_cer',
+                'stat_key': None,
+                'err_key': None,
+                'format': '{:.4f}',
+                'lower_is_better': True
+            },
+            'unk_token_rate': {
+                'title': 'UNK Rate',
+                'key_path': ['reconstruction_fidelity', 'summary'],
+                'value_key': 'unk_token_rate',
+                'stat_key': None,
+                'err_key': None,
+                'format': '{:.4f}',
+                'lower_is_better': True
+            },
+            'whitespace_fidelity': {
+                'title': 'WS Fidelity',
+                'key_path': ['reconstruction_fidelity', 'summary'],
+                'value_key': 'whitespace_fidelity',
+                'stat_key': None,
+                'err_key': None,
+                'format': '{:.3f}',
+                'lower_is_better': False
             }
         }
     
