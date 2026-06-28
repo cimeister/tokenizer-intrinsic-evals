@@ -1149,6 +1149,39 @@ class TestProcessToken:
         for t in tokens:
             assert self.inst._decode_raw_token(t) == self.inst._process_token(t, preserve_space=True)
 
+    # -- SentencePiece byte-fallback decoding (<0xNN> → chr(NN)) --
+
+    def test_sp_byte_fallback_newline(self):
+        """<0x0A> should decode to a literal newline (the bug that broke EuroLLM)."""
+        assert self.inst._decode_byte_fallback("<0x0A>") == "\n"
+        assert self.inst._process_token("<0x0A>", preserve_space=False) == "\n"
+        assert self.inst._process_token("<0x0A>", preserve_space=True) == "\n"
+
+    def test_sp_byte_fallback_tab(self):
+        assert self.inst._process_token("<0x09>", preserve_space=True) == "\t"
+
+    def test_sp_byte_fallback_lowercase_hex(self):
+        """Accept lowercase hex even though SentencePiece normally emits uppercase."""
+        assert self.inst._decode_byte_fallback("<0x0a>") == "\n"
+
+    def test_sp_byte_fallback_within_token(self):
+        """Byte-fallback substring inside a larger string should be decoded in place."""
+        assert self.inst._decode_byte_fallback("Ġ<0x0A>") == "Ġ\n"
+
+    def test_sp_byte_fallback_no_match_unchanged(self):
+        """Tokens without the <0xNN> pattern pass through unchanged."""
+        assert self.inst._decode_byte_fallback("def") == "def"
+        assert self.inst._decode_byte_fallback("<0x>") == "<0x>"      # invalid (no hex)
+        assert self.inst._decode_byte_fallback("<0xZZ>") == "<0xZZ>"  # invalid hex
+
+    def test_build_char_to_token_map_with_byte_fallback(self):
+        """A <0xNN> token in the middle of a token sequence should produce one
+        decoded character and attribute char_to_token to its index."""
+        tokens = ["def", "<0x0A>", "x"]
+        recon, c2t = self.inst._build_char_to_token_map(tokens)
+        assert recon == "def\nx"
+        assert c2t == [0, 0, 0, 1, 2]
+
 
 # ======================================================================
 # _build_source_char_to_token_map

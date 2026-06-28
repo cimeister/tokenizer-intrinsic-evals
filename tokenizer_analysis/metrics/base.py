@@ -31,11 +31,33 @@ class BaseMetrics(ABC):
     _END_WORD = re.compile(r'</w>$')
     _CONTINUATION_END = re.compile(r'@@$')
     _SPECIAL_TOKEN = re.compile(r'^(<\||\[).*(\|>|\])$')
+    # SentencePiece byte-fallback token form: a single token encoding one raw
+    # byte as the literal 6-character string `<0xNN>` (NN = uppercase or
+    # lowercase hex). Emitted by LLaMA-family / Mistral SP tokenizers with
+    # `byte_fallback=True` for any byte (e.g. newline → `<0x0A>`, tab → `<0x09>`).
+    _BYTE_FALLBACK = re.compile(r'<0x([0-9A-Fa-f]{2})>')
 
     # Known byte-level BPE / SentencePiece character remappings.
     _DEFAULT_CHAR_DECODE: Dict[str, str] = {
         'Ġ': ' ', '▁': ' ', 'Ċ': '\n', 'ĉ': '\t', 'č': '\r',
     }
+
+    @classmethod
+    def _decode_byte_fallback(cls, token: str) -> str:
+        """Decode SentencePiece byte-fallback substrings in *token* to their raw bytes.
+
+        Replaces every occurrence of `<0xNN>` (case-insensitive hex) with the
+        single character `chr(int(NN, 16))`. A no-op for tokens that contain no
+        byte-fallback substring (the common case).
+
+        Why this exists: the per-character `_DEFAULT_CHAR_DECODE` table cannot
+        express the 6-char → 1-char rewrite that byte-fallback needs. Without
+        this step, `<0x0A>` reaches the char-to-token reconstruction as the
+        literal six-char string instead of as `\\n`, which breaks the source-to-recon
+        greedy match at every newline / non-ASCII byte for SP-byte-fallback
+        tokenizers (EuroLLM, LLaMA family, etc.).
+        """
+        return cls._BYTE_FALLBACK.sub(lambda m: chr(int(m.group(1), 16)), token)
 
     def __init__(self, input_provider: InputProvider):
         self.input_provider = input_provider
@@ -183,6 +205,12 @@ class BaseMetrics(ABC):
         """
         if self._SPECIAL_TOKEN.match(raw_token):
             return None
+
+        # Decode SentencePiece byte-fallback tokens (`<0xNN>` → chr(NN)) before
+        # the per-char table. The table can only express 1-char→1-char rewrites
+        # and would leave the literal six-char `<0xNN>` in place, which then
+        # corrupts char-to-token reconstruction for SP-byte-fallback tokenizers.
+        raw_token = self._decode_byte_fallback(raw_token)
 
         # Build effective decode table: always start with defaults, overlay
         # probed table when available.  This is safe because the default
