@@ -596,7 +596,11 @@ class BasicTokenizationMetrics(BaseMetrics):
         for tok_name in self.tokenizer_names:
             try:
                 tokenizer = self.input_provider.get_tokenizer(tok_name)
-            except Exception:
+            except Exception as e:
+                logger.warning(
+                    "Reconstruction fidelity: skipping %s (could not load tokenizer: %s)",
+                    tok_name, e,
+                )
                 continue
 
             if not tokenizer.can_decode():
