@@ -157,7 +157,11 @@ class TokenizerWrapper(ABC):
 
     def has_unk_token(self) -> bool:
         return self.get_unk_token_id() is not None
-    
+
+    def get_special_token_ids(self) -> set:
+        """IDs of tokens declared special in the tokenizer's metadata. Default: none."""
+        return set()
+
     def get_metadata(self) -> Dict[str, Any]:
         """Get additional tokenizer metadata."""
         return {
@@ -321,25 +325,51 @@ class HuggingFaceTokenizer(TokenizerWrapper):
             return result
         return super().convert_ids_to_tokens(token_ids)
 
+    def _added_tokens_decoder(self):
+        """Return {id: AddedToken-like} for declared added/special tokens, for either a
+        transformers tokenizer or a raw tokenizers.Tokenizer; {} if unavailable."""
+        tok = self._tokenizer
+        dec = getattr(tok, 'added_tokens_decoder', None)
+        if dec:
+            return dec
+        if hasattr(tok, 'get_added_tokens_decoder'):
+            try:
+                return tok.get_added_tokens_decoder()
+            except Exception:
+                return {}
+        return {}
+
+    def get_special_token_ids(self) -> set:
+        """IDs of all tokens ADDED outside the learned vocabulary -- declared special tokens
+        (<bos>, <pad>, <unk>, ...) and reserved/control tokens (<unused123>, [multimodal], ...).
+        Taken from the tokenizer's own metadata (added_tokens / all_special_ids), never guessed
+        from surface form. These are intentional additions, not learned merges, so callers
+        exclude them from junk / unused-vocab statistics."""
+        tok = self._tokenizer
+        ids = set()
+        try:
+            ids.update(i for i in getattr(tok, 'all_special_ids', []) or [] if i is not None)
+        except Exception:
+            pass
+        for i in self._added_tokens_decoder().keys():
+            ids.add(int(i))
+        return ids
+
     def get_unk_token_id(self) -> Optional[int]:
-        """Get the UNK token ID from HuggingFace tokenizer."""
-        # Try direct access to unk_token_id
-        if hasattr(self._tokenizer, 'unk_token_id'):
-            return self._tokenizer.unk_token_id
-
-        # Try getting it through the vocabulary
-        vocab = self.get_vocab()
-        if vocab:
-            unk_candidates = UNK_CANDIDATES
-            for candidate in unk_candidates:
-                if candidate in vocab:
-                    return vocab[candidate]
-
-        # Try through unk_token and token_to_id
-        if hasattr(self._tokenizer, 'unk_token') and hasattr(self._tokenizer, 'token_to_id'):
-            if self._tokenizer.unk_token:
-                return self._tokenizer.token_to_id(self._tokenizer.unk_token)
-
+        """UNK token ID from the tokenizer's declared metadata only. A real UNK token is
+        always a declared special token (e.g. transformers' unk_token_id, or an added_tokens
+        entry with special=True whose content is a recognized UNK form). A bare 'unk' subword
+        is never treated as UNK -- that earlier heuristic mislabeled ordinary subwords."""
+        tok = self._tokenizer
+        uid = getattr(tok, 'unk_token_id', None)   # transformers: authoritative metadata
+        if uid is not None:
+            return uid
+        for i, a in self._added_tokens_decoder().items():
+            content = getattr(a, 'content', None)
+            if content is None:
+                content = str(a)
+            if getattr(a, 'special', False) and content in UNK_CANDIDATES:
+                return int(i)
         return None
 
     @classmethod
