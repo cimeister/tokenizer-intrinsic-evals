@@ -1,5 +1,5 @@
 # SwissAI TokEval
-This is the library used by the Apertus tokenization team for intrinsic evaluation during tokenizer development
+A toolkit for computing intrinsic quality metrics for tokenizers across natural language, code, and math.
 
 
 ## Quick Start
@@ -20,32 +20,6 @@ open results/fertility.png  # Basic metric comparison chart
 ```
 
 This will analyze two sample tokenizers (BPE and Unigram) across 5 languages and generate comparison plots.
-
-## Adding Tokenizer Results
-Use the following measurement config and language config for adding results to GitHub:
-
-```bash
-# Generate / update a local RESULTS.md
-uv run tokenizer-analysis \
-    --tokenizer-config configs/baseline_tokenizers.json \
-    --language-config configs/core_lang_config.json \
-    --measurement-config configs/text_measurement_config_lines.json \
-    --code-ast-config configs/starcoder_ast_config.json \
-    --verbose --run-grouped-analysis --per-language-plots --no-global-lines \
-    --update-results-md --dataset flores_core --use-builtin-math-data
-
-# Push results to GitHub
-uv run python scripts/update_remote.py
-```
-
-Specify the path to your tokenizer file in the JSON given to `--tokenizer-config` (see [Configuration Files](#configuration-files)).
-
-> **Note:** The `--code-ast-config` flag points to `configs/starcoder_ast_config.json`, which expects a `starcoder/` directory in the repo root containing language-specific parquet files. If you're working on the Alps cluster, then creating this symlink will solve that problem.
-
-```bash
-ln -s /capstor/store/cscs/swissai/a139/datasets/tokenizer_training/tokenizer_training_dataset/starcoder starcoder
-```
-Without this data the AST metrics still run but fall back to small built-in synthetic samples. If you are working off-cluster or don't have access to the shared data, you can omit `--code-ast-config` entirely.
 
 ## Visualizing Tokenization
 
@@ -141,19 +115,6 @@ uv run tokenizer-analysis --use-sample-data --update-results-md my_results.md
 ```
 
 Each row is keyed by `tokenizer_name (user, dataset)` — different users or datasets produce separate rows, while re-running the same combination updates in place.
-
-### Sharing Results via Git
-
-Use `scripts/update_remote.py` to push results to a dedicated branch (default: `results`) without switching your branch or touching the working tree.
-
-```bash
-uv run python scripts/update_remote.py                                # Push to origin/results
-uv run python scripts/update_remote.py --validate-local-results       # Validate format only
-uv run python scripts/update_remote.py --remove-my-results            # Remove your rows from remote
-uv run python scripts/update_remote.py --remove-my-results --all      # Remove from all RESULTS files
-```
-
-When multiple team members push, the remote file is fetched and merged first — rows from others are preserved.
 
 ## Configuration Files
 
@@ -556,13 +517,12 @@ tokenizer_analysis/
     ├── plots.py                  # Core plotting functions
     ├── data_extraction.py        # Data extraction for plotting
     ├── latex_tables.py           # LaTeX table generation
-    ├── markdown_tables.py        # Markdown table generation and git push
+    ├── markdown_tables.py        # Markdown table generation
     └── visualization_config.py   # Visualization configuration
 
 scripts/
 ├── run_tokenizer_analysis.py     # Legacy CLI wrapper (use `uv run tokenizer-analysis` instead)
-├── visualize_tokenization.py     # Token boundary visualization
-└── update_remote.py              # Push RESULTS.md to a remote git branch
+└── visualize_tokenization.py     # Token boundary visualization
 ```
 
 ## Performance
