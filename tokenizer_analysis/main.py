@@ -909,27 +909,28 @@ class UnifiedTokenizerAnalyzer:
         for tok_name in self.tokenizer_names:
             vocab_file_path = os.path.join(save_dir, f"{tok_name}_vocab.txt")
             
-            # Try to get actual vocabulary tokens if available
+            # Export the tokenizer's real vocabulary. Refuse to fabricate one:
+            # a placeholder vocabulary file would silently corrupt downstream
+            # vocabulary-based metrics (junk tokens, dead vocab, avg langs/token).
             try:
                 tokenizer = self.input_provider.get_tokenizer(tok_name)
-                if hasattr(tokenizer, 'get_vocab'):
-                    # Get vocabulary mapping and sort by token IDs
-                    vocab_dict = tokenizer.get_vocab()
-                    sorted_vocab = sorted(vocab_dict.items(), key=lambda x: x[1])
-                    tokens = [token for token, _ in sorted_vocab]
-                elif hasattr(tokenizer, 'vocab'):
-                    # Alternative vocabulary access
-                    vocab_dict = tokenizer.vocab
-                    sorted_vocab = sorted(vocab_dict.items(), key=lambda x: x[1])
-                    tokens = [token for token, _ in sorted_vocab]
-                else:
-                    # Fallback: create dummy tokens
-                    vocab_size = self.input_provider.get_vocab_size(tok_name)
-                    tokens = [f"<token_{i}>" for i in range(vocab_size)]
-            except:
-                # Fallback: create dummy tokens if tokenizer access fails
-                vocab_size = self.input_provider.get_vocab_size(tok_name)
-                tokens = [f"<token_{i}>" for i in range(vocab_size)]
+            except Exception as e:
+                raise RuntimeError(
+                    f"Cannot export vocabulary for '{tok_name}': failed to load "
+                    f"the tokenizer ({e})."
+                ) from e
+
+            if hasattr(tokenizer, 'get_vocab'):
+                vocab_dict = tokenizer.get_vocab()
+            elif hasattr(tokenizer, 'vocab'):
+                vocab_dict = tokenizer.vocab
+            else:
+                raise RuntimeError(
+                    f"Cannot export vocabulary for '{tok_name}': the tokenizer "
+                    f"exposes neither get_vocab() nor a vocab attribute."
+                )
+            sorted_vocab = sorted(vocab_dict.items(), key=lambda x: x[1])
+            tokens = [token for token, _ in sorted_vocab]
             
             # Save vocabulary as line-by-line text file
             with open(vocab_file_path, 'w', encoding='utf-8') as f:

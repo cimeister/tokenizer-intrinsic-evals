@@ -74,12 +74,12 @@ def load_multilingual_data(language_metadata: LanguageMetadata,
             texts = load_language_data(data_path, max_texts_per_language)
             if texts:
                 language_texts[lang_code] = texts
-                logger.info(f"✅ Loaded {len(texts)} texts for {lang_name} ({lang_code})")
+                logger.info(f"Loaded {len(texts)} texts for {lang_name} ({lang_code})")
             else:
-                logger.warning(f"❌ No texts found for {lang_name} ({lang_code})")
+                logger.warning(f"No texts found for {lang_name} ({lang_code})")
         
         except Exception as e:
-            logger.error(f"❌ Failed to load data for {lang_name} ({lang_code}): {e}")
+            logger.error(f"Failed to load data for {lang_name} ({lang_code}): {e}")
             continue
     
     if filter_by_group:
