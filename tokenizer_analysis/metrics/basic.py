@@ -286,7 +286,16 @@ class BasicTokenizationMetrics(BaseMetrics):
                     'description': (
                         'Proportion of vocabulary actually used. '
                         'per_language_std and per_language_cov measure dispersion '
-                        'of the per-language utilization ratio across languages.'
+                        'of the per-language utilization ratio across languages. '
+                        'avg_langs_per_token is the cross-language token-sharing '
+                        'metric: for each learned merge token used at least once '
+                        'across the language set, count the distinct languages it '
+                        'is emitted in (K=1, any occurrence); average across used '
+                        'merge tokens. Excludes single-character base tokens and '
+                        'declared special/reserved tokens so the metric reflects '
+                        'learned cross-language sharing rather than structural '
+                        'byte coverage. Range [1, n_languages]; higher = more '
+                        'sharing. None when n_languages < 2.'
                     ),
                     'metric_range': '[0.0, 1.0]',
                     'std_ddof': 1,
@@ -304,13 +313,23 @@ class BasicTokenizationMetrics(BaseMetrics):
             # Compute global utilization
             global_util = self._compute_vocabulary_utilization(tok_data, vocab_size)
 
-            # Compute per-language utilization
+            # Compute per-language utilization and retain the per-language
+            # token-id sets so the cross-language token-sharing metric below
+            # can iterate them without re-tokenizing.
             per_lang_util = {}
+            per_lang_used_ids: Dict[str, set] = {}
             lang_groups = TokenizedDataProcessor.group_by_language(tok_data)
 
             for language, lang_data in lang_groups.items():
-                lang_util = self._compute_vocabulary_utilization(lang_data, vocab_size)
-                per_lang_util[language] = lang_util
+                unique = TokenizedDataProcessor.get_unique_tokens(lang_data)
+                per_lang_used_ids[language] = unique
+                used = len(unique)
+                per_lang_util[language] = {
+                    'utilization': self.safe_divide(used, vocab_size, 0.0),
+                    'used_tokens': used,
+                    'vocab_size': vocab_size,
+                    'unused_tokens': vocab_size - used,
+                }
 
             # Cross-language dispersion of the utilization ratio. Computed on
             # the ratio (not used_tokens) so it stays comparable across
@@ -326,6 +345,8 @@ class BasicTokenizationMetrics(BaseMetrics):
                 util_std = 0.0
                 util_cov = None
 
+            avg_langs = self._compute_avg_langs_per_token(tok_name, per_lang_used_ids)
+
             results['vocabulary_utilization']['per_tokenizer'][tok_name] = {
                 'global_utilization': global_util['utilization'],
                 'global_used_tokens': global_util['used_tokens'],
@@ -334,9 +355,52 @@ class BasicTokenizationMetrics(BaseMetrics):
                 'per_language_mean': util_mean,
                 'per_language_std': util_std,
                 'per_language_cov': util_cov,
+                'avg_langs_per_token': avg_langs,
             }
 
         return results
+
+    def _compute_avg_langs_per_token(self, tok_name: str,
+                                     per_lang_used_ids: Dict[str, set]) -> Optional[float]:
+        """Cross-language token-sharing metric: for each learned merge token used
+        at least once across the language set, count the distinct languages it is
+        emitted in; return the mean across used merge tokens. K=1 (any occurrence
+        counts as use in a language). Excludes single-character base tokens (the
+        byte-level 256-byte alphabet for byte-level BPE) and declared special/
+        reserved tokens, so the metric reflects learned cross-language sharing,
+        not structural byte coverage. Returns None when fewer than 2 languages
+        are present or no learned merge tokens are emitted."""
+        if len(per_lang_used_ids) < 2:
+            return None
+        # avg-langs needs to introspect the tokenizer's vocab and special-token
+        # ids. get_tokenizer is provided by the production providers but is not
+        # part of the base InputProvider interface, so skip this optional metric
+        # (return None) rather than crash the whole vocab-util analysis when a
+        # provider does not expose it.
+        get_tokenizer = getattr(self.input_provider, "get_tokenizer", None)
+        if get_tokenizer is None:
+            return None
+        wrapper = get_tokenizer(tok_name)
+        if wrapper is None:
+            return None
+        vocab = wrapper.get_vocab() or {}
+        id_to_str = {tid: s for s, tid in vocab.items()}
+        special_ids = wrapper.get_special_token_ids()
+        counts: Dict[int, int] = defaultdict(int)
+        for used in per_lang_used_ids.values():
+            for tid in used:
+                if tid in special_ids:
+                    continue
+                s = id_to_str.get(tid)
+                if s is None or len(s) <= 1:
+                    # Single-character vocab entries are the byte-level base
+                    # alphabet (or analogous base symbols); skip so the metric
+                    # measures learned sharing.
+                    continue
+                counts[tid] += 1
+        if not counts:
+            return None
+        return sum(counts.values()) / len(counts)
     
     def _compute_vocabulary_utilization(self, tokenized_data: List[TokenizedData], vocab_size: int) -> Dict[str, Any]:
         """Compute vocabulary utilization for a list of TokenizedData."""
