@@ -209,7 +209,7 @@ class InputLoader:
 
 
 class InputValidator:
-    """Comprehensive validation for input data."""
+    """Validation for input data."""
     
     @staticmethod
     def validate_tokenized_data(tokenized_data: List[TokenizedData], 

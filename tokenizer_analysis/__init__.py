@@ -1,7 +1,7 @@
 """
 Tokenizer Analysis Module
 
-A modular framework for comprehensive tokenizer comparison and analysis.
+A modular framework for tokenizer comparison and analysis.
 Supports both pairwise and multi-tokenizer comparisons with various metrics
 including information-theoretic measures and segmentation analysis.
 """

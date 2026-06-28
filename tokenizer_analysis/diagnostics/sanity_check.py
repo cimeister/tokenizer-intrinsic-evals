@@ -829,7 +829,7 @@ class TokenizerSanityChecker:
         unk = self.wrapper.get_unk_token_id()
         if isinstance(unk, int):
             specials["unk_token_id"] = unk
-        # Robust UNK presence: the wrapper's get_unk_token_id() can return
+        # UNK presence: the wrapper's get_unk_token_id() can return
         # None even when an UNK token exists (observed: bert-base-uncased,
         # [UNK]=100).  Fall back to scanning the vocab for known UNK strings.
         from ..constants import UNK_CANDIDATES
@@ -964,7 +964,7 @@ class TokenizerSanityChecker:
         return _mk(name, "behavioral", Severity.PASS,
                    f"{identical}/{len(NFC_NFD_PAIRS)} encode-identical", None,
                    "NFC/NFD pairs roundtrip without red-flag bugs",
-                   "canonical-equivalence robustness")
+                   "canonical-equivalence handling")
 
     # ===================================================================
     # C12 — emoji / ZWJ / control
@@ -987,7 +987,7 @@ class TokenizerSanityChecker:
                        [v for vs in lossy.values() for v in vs])
         return _mk(name, "behavioral", Severity.PASS, "clean", None,
                    "emoji/ZWJ/control probes roundtrip cleanly",
-                   "robust handling of astral/ZWJ/control input")
+                   "handling of astral/ZWJ/control input")
 
     # ===================================================================
     # C13 — UNK incidence per script
@@ -1100,7 +1100,7 @@ class TokenizerSanityChecker:
         embedded context, even though its standalone surface pre-tokenizes into
         >=2 pieces.
 
-        Robust to arbitrary pretokenization regexes, including negative-lookahead
+        Handles arbitrary pretokenization regexes, including negative-lookahead
         repeat caps (e.g. ``(?!(?<p>.)\\k<p>{8})``): such regexes condition the
         split on the *surrounding* characters, so a token can be reachable only
         when its neighbours differ from its run character. We therefore probe

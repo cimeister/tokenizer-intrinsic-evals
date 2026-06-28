@@ -1,3 +1,5 @@
+"""Constants for the multilingual data loaders."""
+
 ISO639_1_to_ISO639_2 = {
     'en': 'eng',
     'es': 'spa',

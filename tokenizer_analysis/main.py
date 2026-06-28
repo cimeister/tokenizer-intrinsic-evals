@@ -175,7 +175,7 @@ class UnifiedTokenizerAnalyzer:
                     tokenized_data_path: str = None,
                     cer_time_budget_s: float = 30.0) -> Dict[str, Any]:
         """
-        Run comprehensive tokenizer analysis.
+        Run the full tokenizer analysis.
 
         Args:
             save_plots: Whether to generate and save plots
