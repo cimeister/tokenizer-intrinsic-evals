@@ -85,7 +85,11 @@ MAX_MORPHEME_OVERLAP = 1.0
 
 PUNCTUATION = '.,!?;:"()[]{}'
 
-UNK_CANDIDATES = ['<unk>', '[UNK]', '<UNK>', 'unk', 'UNK', '\u2047', '<|endoftext|>']
+# Real UNK tokens are always delimited. Bare 'unk'/'UNK' were removed because they
+# match ordinary subwords (e.g. SuperBPE has a plain 'unk' subword from words like
+# "junk"/"sunk"), which made get_unk_token_id() misidentify it as the UNK token and
+# inflated unk_token_rate. '<|endoftext|>' is GPT-style EOS, not UNK, so also dropped.
+UNK_CANDIDATES = ['<unk>', '[UNK]', '<UNK>', '<|unk|>', '\u2047']
 
 
 # --- Tokenizer Sanity Check ---
@@ -97,11 +101,38 @@ UNK_CANDIDATES = ['<unk>', '[UNK]', '<UNK>', 'unk', 'UNK', '\u2047', '<|endoftex
 SANITY_BYTE_COVERAGE_REQUIRED = 256
 # C1: >0 bytes that are in vocab but fail behavioral roundtrip -> warn.
 SANITY_MAX_UNREPRESENTABLE_BYTES_WARN = 0
+# C17: strict byte-alphabet vocab presence. Above this count of missing single-byte
+# tokens, the check is a WARNING. Round-trip can still succeed via multi-token
+# fallback (that is what C1 tests), but a strict alphabet is needed for deterministic
+# single-token encoding of every byte and to give the LM a real embedding slot for
+# each byte. Missing valid UTF-8 lead bytes (0xC2-0xF4) affect text in Supplementary
+# Unicode planes (rare CJK extensions, Linear B, Cuneiform, Egyptian hieroglyphs, ...).
+SANITY_STRICT_BYTE_ALPHABET_WARN_COUNT = 0
 # C2: fraction of vocab tokens that begin with a combining mark.
 SANITY_MARK_LEADING_TOKEN_WARN_FRAC = 0.005
 SANITY_MARK_LEADING_TOKEN_FAIL_FRAC = 0.02
-# C16: count of vocab tokens the tokenizer's own normalizer can never emit.
-SANITY_VOCAB_UNREACHABLE_FAIL_COUNT = 0
+# C16: count of pretokenizer-unreachable vocab tokens (the pretokenizer splits the
+# surface and no embedded context emits it). Above this count the check is a WARNING:
+# the slot is wasted capacity but no input produces the token, so it cannot corrupt
+# text or emit UNK.
+SANITY_VOCAB_UNREACHABLE_WARN_COUNT = 0
+# C16: count of normalization-unreachable vocab tokens (the introspectable normalizer
+# folds the surface to something else, so NO input can ever produce the token). Above
+# this count the check FAILs: a vocab token the normalizer guarantees is unreachable
+# signals a vocab built without applying the normalizer, a construction defect distinct
+# from a merely wasted pretokenizer slot.
+SANITY_VOCAB_NORMALIZATION_DEAD_FAIL_COUNT = 0
+# C16: fixed multi-domain text used to detect whether a tokenizer merges across
+# pretokenizer boundaries (e.g. SuperBPE superwords). If encoding it emits any token
+# whose surface contains internal whitespace, the tokenizer is cross-boundary and the
+# pretokenizer-unreachable check is skipped (such tokens are reachable by design).
+SANITY_CROSS_BOUNDARY_PROBE = (
+    "The quick brown fox jumps over the lazy dog. This is a test of the system, and we "
+    "want to know whether superword tokens are emitted in practice. In the beginning "
+    "there was nothing and then there was something more than before. "
+    "def foo(x): return x + 1\n"
+    "Les choses que nous faisons ici. El mundo es grande. Wir gehen nach Hause."
+)
 # C3: on the curated probe set every probe must be clean or lossy_expected.
 SANITY_ROUNDTRIP_CLEAN_PASS_FRAC = 1.0
 # C3: any red-flag bug -> at least warn; >= fail frac -> fail.

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import math
+import re
 import sys
 import unicodedata
 from dataclasses import dataclass, field
@@ -25,6 +26,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from ..constants import (
     MAX_EXAMPLE_DISPLAY_COUNT,
     SANITY_BYTE_COVERAGE_REQUIRED,
+    SANITY_CROSS_BOUNDARY_PROBE,
     SANITY_DIGIT_CONSISTENCY_PASS,
     SANITY_DIGIT_ENTROPY_NORM,
     SANITY_MARK_LEADING_TOKEN_FAIL_FRAC,
@@ -35,7 +37,9 @@ from ..constants import (
     SANITY_ROUNDTRIP_BUG_FAIL_FRAC,
     SANITY_ROUNDTRIP_CLEAN_PASS_FRAC,
     SANITY_UNK_SCRIPT_WARN_RATE,
-    SANITY_VOCAB_UNREACHABLE_FAIL_COUNT,
+    SANITY_VOCAB_UNREACHABLE_WARN_COUNT,
+    SANITY_VOCAB_NORMALIZATION_DEAD_FAIL_COUNT,
+    SANITY_STRICT_BYTE_ALPHABET_WARN_COUNT,
     SANITY_WHITESPACE_FIDELITY_PASS_FRAC,
 )
 from ..core.tokenizer_wrapper import (
@@ -309,6 +313,34 @@ class TokenizerSanityChecker:
     def _token_bytes(self, raw: str) -> Optional[bytes]:
         return _token_string_to_bytes(raw, self.byte_enc["unicode_to_byte"])
 
+    # -- C16 helper ------------------------------------------------------
+
+    def _is_cross_boundary(self) -> bool:
+        """True if the tokenizer merges across pretokenizer boundaries (e.g. SuperBPE
+        superwords). Detected behaviorally: encode a fixed probe and check whether any
+        emitted token's surface contains internal whitespace -- impossible for a normal
+        within-pretoken BPE/Unigram, routine for a superword tokenizer. Cached.
+
+        This must be behavioral, not based on pretokenize(): a SuperBPE pretokenizer
+        leaves an internal-space superword like ' over the' as ONE piece but splits a
+        trailing-space token like ' before ' into two, so pretokenize() is not a reliable
+        cross-boundary signal."""
+        if getattr(self, "_cross_boundary_cache", None) is not None:
+            return self._cross_boundary_cache
+        result = False
+        if self.wrapper.can_decode():
+            try:
+                ids = self._encode(SANITY_CROSS_BOUNDARY_PROBE)
+                for tid in ids:
+                    surf = self.wrapper.decode([tid], skip_special_tokens=False)
+                    if surf and any(c.isspace() for c in surf.strip()):
+                        result = True
+                        break
+            except Exception:
+                result = False
+        self._cross_boundary_cache = result
+        return result
+
     # -- C9 helper -------------------------------------------------------
 
     def _detect_lowercasing(self) -> bool:
@@ -395,6 +427,63 @@ class TokenizerSanityChecker:
                    f"all 256 bytes representable in vocab ({style}; "
                    "static check only)",
                    "byte-level tokenizer covers the full byte range")
+
+    # ===================================================================
+    # C17 — strict byte-alphabet vocab presence
+    # ===================================================================
+    # C1 is round-trip-based: it returns PASS when every byte round-trips
+    # via fallback, even if some byte-alphabet tokens are absent. C17 is the
+    # strict variant: every byte must appear as its own single-token vocab
+    # key. Missing valid UTF-8 lead bytes (0xC2-0xF4) affect text in
+    # Supplementary Unicode planes (rare CJK, ancient scripts), fragment
+    # tokenization for those characters, and leave the LM with effectively
+    # no learned embedding for them.
+
+    def check_byte_alphabet_strict(self) -> Dict[str, Any]:
+        name = "C17 strict byte-alphabet vocab presence"
+        style = self.byte_enc["style"]
+        if style is None:
+            return _mk(name, "static", Severity.NOT_APPLICABLE, 0,
+                       SANITY_STRICT_BYTE_ALPHABET_WARN_COUNT,
+                       "tokenizer is not byte-level; strict byte-alphabet check skipped",
+                       "only byte-level tokenizers have a 256-byte alphabet to enumerate")
+        representable = set()
+        if style == "gpt2":
+            present = set(self.vocab.keys())
+            for ch, b in _GPT2_UNICODE_TO_BYTE.items():
+                if ch in present:
+                    representable.add(b)
+        else:  # byte_fallback
+            for tok in self.vocab:
+                m = _BYTE_FALLBACK_RE.match(str(tok))
+                if m:
+                    representable.add(int(m.group(1), 16))
+        missing = sorted(set(range(256)) - representable)
+        if len(missing) > SANITY_STRICT_BYTE_ALPHABET_WARN_COUNT:
+            # Valid UTF-8 lead bytes are 0xC2-0xF4 (2/3/4-byte sequence starts).
+            # Anything else in `missing` is either a continuation byte (0x80-0xBF)
+            # or an invalid lead (0xC0-0xC1, 0xF5-0xFF) that can never appear in
+            # valid UTF-8 text.
+            valid_leads = [b for b in missing if 0xC2 <= b <= 0xF4]
+            other = [b for b in missing if b not in valid_leads]
+            note = (
+                f"{len(missing)} byte value(s) absent as standalone vocab keys "
+                f"({len(valid_leads)} valid UTF-8 lead byte(s), "
+                f"{len(other)} non-UTF-8-lead byte(s)). Round-trip still succeeds "
+                f"via multi-token fallback (see C1); the valid-lead misses affect "
+                f"characters in Supplementary Unicode planes."
+            )
+            return _mk(name, "static", Severity.WARN, len(missing),
+                       SANITY_STRICT_BYTE_ALPHABET_WARN_COUNT,
+                       note,
+                       "a complete 256-byte vocab alphabet gives deterministic "
+                       "single-token encoding for every byte and a real embedding "
+                       "slot per byte in the downstream LM",
+                       [hex(b) for b in missing])
+        return _mk(name, "static", Severity.PASS, 0,
+                   SANITY_STRICT_BYTE_ALPHABET_WARN_COUNT,
+                   "all 256 byte-alphabet tokens present as standalone vocab keys",
+                   "byte-level tokenizer has a complete 256-byte alphabet")
 
     # ===================================================================
     # C2 — combining-mark mishandling (static is the real signal)
@@ -998,17 +1087,74 @@ class TokenizerSanityChecker:
     # C16 — vocab reachability under the faithful pipeline
     # ===================================================================
 
+    # Representative "breaker" characters, one per major regex branch class
+    # (letter, digit, ASCII punctuation, space, newline). A token whose
+    # standalone surface the pretokenizer splits may still be emitted when it
+    # sits next to a character of a different class -- the neighbour lets a
+    # different arm capture the surface as one pre-token. This is generic to any
+    # split regex; it is NOT specific to repeat-run caps.
+    _REACH_BREAKERS = ("a", "0", ".", " ", "\n")
+
+    def _embedded_reachable(self, surface: str, tid: int) -> bool:
+        """Probe whether a token is emitted by the faithful pipeline in *some*
+        embedded context, even though its standalone surface pre-tokenizes into
+        >=2 pieces.
+
+        Robust to arbitrary pretokenization regexes, including negative-lookahead
+        repeat caps (e.g. ``(?!(?<p>.)\\k<p>{8})``): such regexes condition the
+        split on the *surrounding* characters, so a token can be reachable only
+        when its neighbours differ from its run character. We therefore probe
+        breakers on the prefix, the suffix, and both sides (lookaheads look
+        forward, so the suffix probe matters), plus a doubled run for
+        single-character tokens (a longer identical run can emit the token as a
+        within-run chunk).
+
+        Reachability is decided by the real ``_encode`` pipeline, never by
+        reasoning about the regex, so a hit is always a genuine witness input.
+        A miss leaves the conservative "unreachable" verdict untouched; the
+        probe can only remove false positives, never introduce a false "dead".
+        """
+        if not surface:
+            return False
+        probes = []
+        for b in self._REACH_BREAKERS:
+            probes.append(b + surface)
+            probes.append(surface + b)
+            probes.append(b + surface + b)
+        if len(set(surface)) == 1:
+            probes.append(surface + surface)
+        for p in probes:
+            try:
+                if tid in self._encode(p):
+                    return True
+            except Exception:
+                continue
+        return False
+
     def check_vocab_reachability(self) -> Dict[str, Any]:
         name = "C16 vocab reachability"
         buckets = {"self_reproducing": 0, "context_only": 0,
                    "non_self_reproducing": 0, "normalization_unreachable": 0,
-                   "unverifiable": 0}
+                   "pretokenizer_unreachable": 0, "unverifiable": 0}
         dead_examples = []
         nv = self.normview
         can_decode = self.wrapper.can_decode()
+        # Pretokenizer-unreachable: a token whose standalone surface the pretokenizer splits
+        # into >=2 pre-tokens is a *candidate* for dead vocab, but a standalone split does not
+        # prove it: the token may still be emitted when its surface sits inside a larger
+        # pre-token (a divider run after a different punct char, a run-capped sub-token inside
+        # a longer identical run). _embedded_reachable probes such contexts via the real
+        # pipeline before flagging, so reachable-only-in-context tokens are counted as
+        # context_only. SuperBPE-style tokenizers deliberately merge across *whitespace*
+        # boundaries (superwords), so for them we exempt only tokens whose surface contains
+        # internal whitespace; a non-whitespace dead token (e.g. a >3-digit piece under a
+        # digit-capping pretokenizer) is still a candidate.
+        can_pretok = self.wrapper.can_pretokenize()
+        cross_boundary = can_pretok and self._is_cross_boundary()
+        special_ids = self.wrapper.get_special_token_ids()
         for tok_str, tid in self.vocab.items():
             tok_str = str(tok_str)
-            if is_special_token(tok_str):
+            if tid in special_ids or is_special_token(tok_str):
                 continue
             tb = self._token_bytes(tok_str)
             if tb is None or not _is_valid_complete_utf8(tb):
@@ -1031,6 +1177,47 @@ class TokenizerSanityChecker:
             except Exception:
                 buckets["context_only"] += 1
                 continue
+            # pretokenizer-unreachable: the pretokenizer splits the token's own surface
+            # (after normalization, matching the real pipeline) into >=2 pre-tokens.
+            # A standalone split is necessary but NOT sufficient for dead vocab: a token
+            # can still be emitted when its surface appears inside a larger pre-token
+            # (e.g. a divider run '===============' preceded by a different punct char, or
+            # a run-capped sub-token emitted inside a longer identical run). Before
+            # flagging, _embedded_reachable probes such contexts via the real pipeline; a
+            # token reachable in any context is counted as context_only, not dead. For
+            # cross-boundary (SuperBPE) tokenizers only the internal-whitespace superwords
+            # are exempt from the standalone split test.
+            if can_pretok:
+                eff = surface
+                if nv.introspectable and nv.normalize_fn is not None:
+                    try:
+                        eff = nv.normalize_fn(surface)
+                    except Exception:
+                        eff = surface
+                try:
+                    if cross_boundary:
+                        # SuperBPE-style: stage-2 merges cross *whitespace* only, so a token is
+                        # unreachable only if some whitespace-delimited chunk of its surface is
+                        # itself split by the pretokenizer -- a non-whitespace boundary (e.g. a
+                        # digit cap or punctuation split) it cannot bridge. Whitespace-spanning
+                        # superwords (e.g. ' over the', 'Aug ') are reachable and not flagged.
+                        chunks = [c for c in re.split(r"\s+", eff) if c]
+                        dead_pt = any(len(self.wrapper.pretokenize(c)) >= 2 for c in chunks)
+                    else:
+                        # within-pretoken tokenizer: a standalone pretok split is a candidate
+                        dead_pt = len(self.wrapper.pretokenize(eff)) >= 2
+                except Exception:
+                    dead_pt = False
+                if dead_pt:
+                    # A standalone split alone is not proof of dead vocab; the token may be
+                    # emitted inside a larger pre-token. Probe embedded contexts first.
+                    if self._embedded_reachable(surface, tid):
+                        buckets["context_only"] += 1
+                    else:
+                        buckets["pretokenizer_unreachable"] += 1
+                        if len(dead_examples) < MAX_EXAMPLE_DISPLAY_COUNT:
+                            dead_examples.append(surface[:40])
+                    continue
             if nv.introspectable and nv.normalize_fn is not None:
                 try:
                     snorm = nv.normalize_fn(surface)
@@ -1044,18 +1231,27 @@ class TokenizerSanityChecker:
                 buckets["non_self_reproducing"] += 1
             else:
                 buckets["unverifiable"] += 1
-        dead = buckets["normalization_unreachable"]
-        if dead > SANITY_VOCAB_UNREACHABLE_FAIL_COUNT:
+        # Normalization-dead vocab FAILs: the introspectable normalizer folds the surface,
+        # so NO input can ever produce the token -- it signals a vocab built without applying
+        # the normalizer. Pretokenizer-dead vocab is only a WARN: the slot is wasted but, like
+        # the normalizer case, never corrupts text or emits UNK -- it is a capacity issue, not
+        # a construction defect.
+        if buckets["normalization_unreachable"] > SANITY_VOCAB_NORMALIZATION_DEAD_FAIL_COUNT:
             sev = Severity.FAIL
+        elif buckets["pretokenizer_unreachable"] > SANITY_VOCAB_UNREACHABLE_WARN_COUNT:
+            sev = Severity.WARN
         elif buckets["unverifiable"] > 0:
             sev = Severity.UNVERIFIABLE
         else:
             sev = Severity.PASS
         return _mk(name, "behavioral", sev, buckets,
-                   SANITY_VOCAB_UNREACHABLE_FAIL_COUNT,
+                   SANITY_VOCAB_UNREACHABLE_WARN_COUNT,
                    f"reachability buckets: {buckets}",
-                   "only normalizer-dead vocab fails; context-dependent "
-                   "non-self-reproduction and byte fragments are legitimate",
+                   "normalization-dead vocab FAILs (the normalizer guarantees the token is "
+                   "unreachable -> vocab built without the normalizer); pretokenizer-dead vocab "
+                   "WARNs (wasted slot, but no input produces it so it cannot corrupt text or "
+                   "emit UNK); context-dependent non-self-reproduction and byte fragments are "
+                   "legitimate",
                    dead_examples), buckets
 
     # ===================================================================
@@ -1067,6 +1263,7 @@ class TokenizerSanityChecker:
         c16, reach_buckets = self.check_vocab_reachability()
         checks = [
             self.check_byte_coverage(),
+            self.check_byte_alphabet_strict(),
             self.check_combining_marks(),
             self.check_roundtrip(bd),
             self.check_faithful_pipeline(),
@@ -1091,6 +1288,7 @@ class TokenizerSanityChecker:
             "vocab_composition": {
                 "vocab_size": self.vocab_size,
                 "byte_style": self.byte_enc["style"],
+                "n_special_tokens": len(self.wrapper.get_special_token_ids()),
             },
             "components": {
                 "normalizer": self.normview.normalizer_repr,

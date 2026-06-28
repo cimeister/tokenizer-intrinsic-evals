@@ -92,6 +92,31 @@ def bare_mark_vocab_wrapper():
 
 
 @pytest.fixture(scope="module")
+def embedded_reachable_wrapper():
+    """A token reachable only in embedded context vs a genuinely dead token.
+
+    The Split regex caps identical runs at 3 (a guard arm), but a general arm
+    grabs up to 16 non-space chars. So '####' splits when standalone
+    ('###','#') yet is emitted inside a larger pre-token ('.####' -> '.','####')
+    -> context_only, not dead. 'a a' contains internal whitespace that the
+    (non-cross-boundary) pretokenizer splits in every context -> genuinely
+    pretokenizer_unreachable. This pins the embedded-reachability probe: without
+    it, '####' would be mis-flagged as dead too.
+    """
+    from tokenizers import Tokenizer, Regex
+    from tokenizers.models import BPE
+    from tokenizers.pre_tokenizers import Split
+
+    vocab = {"<unk>": 0, "#": 1, ".": 2, " ": 3, "a": 4,
+             "##": 5, "####": 6, "a a": 7}
+    merges = [("#", "#"), ("##", "##")]
+    tok = Tokenizer(BPE(vocab=vocab, merges=merges, unk_token="<unk>"))
+    tok.pre_tokenizer = Split(
+        Regex(r"(?<g>[^\s])\k<g>{2}|[^\s]{1,16}|\s+"), behavior="isolated")
+    return HuggingFaceTokenizer("embedded-reachable", tok, {})
+
+
+@pytest.fixture(scope="module")
 def sp_identity_wrapper():
     spm = pytest.importorskip("sentencepiece")
     return _train_sp("identity")
@@ -283,11 +308,29 @@ def test_10_whitespace_digit_static_and_c6_formula(byte_level_hf_wrapper):
 
 def test_11_c16_normalization_unreachable_fail(hf_nfkc_wrapper):
     """C16: NFKC folds a fullwidth vocab token -> normalization_unreachable
-    -> the only C16 fail path (introspectable normalizer required)."""
+    -> the only C16 fail path (introspectable normalizer required). The
+    normalizer guarantees no input produces the token, so it is a construction
+    defect (vocab built without the normalizer), distinct from a merely wasted
+    pretokenizer slot (WARN)."""
     rep = _checks(hf_nfkc_wrapper, [Probe("ab", probe_corpus.CAT_ASCII)])
     reach = rep["vocab_reachability"]
     assert reach["normalization_unreachable"] >= 1
     assert rep["checks"]["C16 vocab reachability"]["severity"] == Severity.FAIL
+
+
+def test_12_c16_embedded_reachable_is_context_only(embedded_reachable_wrapper):
+    """C16: a token whose standalone surface the pretokenizer splits but which
+    is emitted inside a larger pre-token (a divider run after a different char)
+    must be classified context_only, NOT pretokenizer_unreachable. Only a token
+    unreachable in EVERY context ('a a', split on its internal whitespace) is
+    dead. Without the embedded-reachability probe both '####' and 'a a' would be
+    flagged, so pretokenizer_unreachable would be 2."""
+    rep = _checks(embedded_reachable_wrapper, [Probe("a # .", probe_corpus.CAT_ASCII)])
+    reach = rep["vocab_reachability"]
+    assert reach["pretokenizer_unreachable"] == 1   # only 'a a'; would be 2 without the probe
+    assert reach["context_only"] >= 1               # '####' reclassified reachable-in-context
+    dead = rep["checks"]["C16 vocab reachability"]["examples"]
+    assert "a a" in dead and "####" not in dead
 
 
 def test_12_c16_non_self_reproducing_not_penalized(byte_level_hf_wrapper):
@@ -309,13 +352,19 @@ def test_13_c16_byte_fragment_context_only(byte_level_hf_wrapper):
     assert rep["vocab_reachability"]["context_only"] > 0
 
 
-def test_14_c16_opaque_normalizer_unverifiable(sp_identity_wrapper):
-    """C16: opaque (SP) normalizer -> unverifiable -> overall >= warn."""
+def test_14_c16_opaque_normalizer_clean_not_forced_unverifiable(sp_identity_wrapper):
+    """C16: an opaque (SentencePiece) normalizer that still decodes and roundtrips
+    cleanly is NOT forced to 'unverifiable'. Opacity alone does not escalate C16;
+    the opacity itself is still surfaced (normalizer_introspectable is False, the
+    no-silent-fallback contract covered by test_14b), and genuine unverifiable
+    cases (undecodable vocab, or unattributable lossy roundtrip) are flagged via
+    the can-decode path here and the C3 lossy_unverifiable path (test_4)."""
     rep = _checks(sp_identity_wrapper, [Probe("hello", "ascii_basic")])
     reach = rep["vocab_reachability"]
-    assert reach["unverifiable"] > 0
+    assert reach["unverifiable"] == 0
+    assert rep["components"]["normalizer_introspectable"] is False
     assert rep["checks"]["C16 vocab reachability"]["severity"] in (
-        Severity.UNVERIFIABLE, Severity.FAIL)
+        Severity.PASS, Severity.WARN)
 
 
 def test_14b_opaque_normalizer_unverifiable_stub():
