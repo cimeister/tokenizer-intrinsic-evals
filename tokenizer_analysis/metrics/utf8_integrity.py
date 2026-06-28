@@ -418,17 +418,30 @@ class UTF8IntegrityMetrics(BaseMetrics):
         source_bytes: bytes,
         mapping: List[Optional[int]],
         byte_to_token: List[int],
-    ) -> Tuple[int, int, int, Dict[int, Tuple[int, int]]]:
+    ) -> Tuple[int, int, int, Dict[int, Tuple[int, int]], int]:
         """Count multi-byte UTF-8 characters whose bytes span multiple tokens.
 
-        Returns ``(split_count, total_multibyte_chars, total_chars, per_width)``
-        where *per_width* maps byte width (2, 3, 4) to
-        ``(splits_at_this_width, total_chars_at_this_width)``.
+        A multi-byte character is classified as split only when all of its
+        bytes aligned to the reconstructed token stream and those bytes come
+        from more than one token. A character with any unaligned byte (a
+        ``None`` entry in *mapping*, produced when ``_align_byte_sequences``
+        could not match it) cannot be classified as split-or-not, so it is
+        excluded from both the split count and the multi-byte total and is
+        reported separately as *unaligned*. This keeps alignment failures out
+        of the split rate; see _align_byte_sequences for when bytes go
+        unaligned.
+
+        Returns ``(split_count, aligned_multibyte_chars, total_chars,
+        per_width, unaligned_multibyte_chars)`` where *aligned_multibyte_chars*
+        is the split-rate denominator (fully-aligned multi-byte chars only) and
+        *per_width* maps byte width (2, 3, 4) to ``(splits_at_this_width,
+        aligned_chars_at_this_width)``.
         """
         splits = 0
-        total_multibyte = 0
+        aligned_multibyte = 0
+        unaligned_multibyte = 0
         total_chars = 0
-        # per_width: width -> [splits, total]
+        # per_width: width -> [splits, aligned_total]
         per_width: Dict[int, List[int]] = {2: [0, 0], 3: [0, 0], 4: [0, 0]}
         i = 0
         n = len(source_bytes)
@@ -456,11 +469,7 @@ class UTF8IntegrityMetrics(BaseMetrics):
             total_chars += 1
 
             if char_len > 1:
-                total_multibyte += 1
-                if char_len in per_width:
-                    per_width[char_len][1] += 1
-
-                # Collect token indices for each byte of this character
+                # Collect token indices for each byte of this character.
                 token_indices = set()
                 has_unmapped = False
                 for k in range(i, i + char_len):
@@ -470,26 +479,25 @@ class UTF8IntegrityMetrics(BaseMetrics):
                     else:
                         has_unmapped = True
 
-                # A character is split if its mapped bytes come from >1 token.
-                # If some bytes are unmapped and others are mapped, that also
-                # indicates a split (the unmapped bytes must have come from
-                # a different token that was lost during alignment).
-                is_split = False
-                if len(token_indices) > 1:
-                    is_split = True
-                elif has_unmapped and len(token_indices) >= 1:
-                    # Some bytes mapped, some not — likely split
-                    is_split = True
-
-                if is_split:
-                    splits += 1
+                if has_unmapped:
+                    # An unaligned byte means alignment failed for this
+                    # character; we cannot tell whether it is split, so it
+                    # is excluded from the split-rate numerator and
+                    # denominator and counted separately.
+                    unaligned_multibyte += 1
+                else:
+                    aligned_multibyte += 1
                     if char_len in per_width:
-                        per_width[char_len][0] += 1
+                        per_width[char_len][1] += 1
+                    if len(token_indices) > 1:
+                        splits += 1
+                        if char_len in per_width:
+                            per_width[char_len][0] += 1
 
             i += char_len
 
         per_width_tuples = {w: (v[0], v[1]) for w, v in per_width.items()}
-        return splits, total_multibyte, total_chars, per_width_tuples
+        return splits, aligned_multibyte, total_chars, per_width_tuples, unaligned_multibyte
 
     # ------------------------------------------------------------------
     # Main compute
@@ -517,7 +525,7 @@ class UTF8IntegrityMetrics(BaseMetrics):
         split_acc: Dict[str, Dict[str, Dict[str, int]]] = defaultdict(
             lambda: defaultdict(
                 lambda: {
-                    'splits': 0, 'multibyte': 0, 'chars': 0,
+                    'splits': 0, 'multibyte': 0, 'unaligned': 0, 'chars': 0,
                     'tokens': 0, 'mismatches': 0,
                     'w2_splits': 0, 'w2_total': 0,
                     'w3_splits': 0, 'w3_total': 0,
@@ -583,7 +591,7 @@ class UTF8IntegrityMetrics(BaseMetrics):
                         mapping, mismatches = self._align_byte_sequences(
                             source_bytes, bytes(byte_stream)
                         )
-                        splits, total_mb, total_chars, per_width = (
+                        splits, aligned_mb, total_chars, per_width, unaligned_mb = (
                             self._count_split_characters(
                                 source_bytes, mapping, byte_to_token
                             )
@@ -591,7 +599,8 @@ class UTF8IntegrityMetrics(BaseMetrics):
 
                         sacc = split_acc[tok_name][lang]
                         sacc['splits'] += splits
-                        sacc['multibyte'] += total_mb
+                        sacc['multibyte'] += aligned_mb
+                        sacc['unaligned'] += unaligned_mb
                         sacc['chars'] += total_chars
                         sacc['tokens'] += total
                         sacc['mismatches'] += mismatches
@@ -691,10 +700,19 @@ class UTF8IntegrityMetrics(BaseMetrics):
             },
         }
 
+        # split_rate and the splits-per-1k rates are None (JSON null) when
+        # their denominator is 0, rather than 0.0, so "no data" is not read as
+        # "no splits". aligned_fraction is the share of multi-byte chars that
+        # aligned (the rest could not be classified); a low value flags an
+        # untrustworthy split_rate.
+        def _ratio(num: int, den: int, scale: float = 1.0) -> Optional[float]:
+            return (num / den * scale) if den > 0 else None
+
         for tok_name in self.tokenizer_names:
             per_lang: Dict[str, Any] = {}
             g_splits = 0
             g_mb = 0
+            g_unaligned = 0
             g_tokens = 0
             g_mismatches = 0
             g_width: Dict[int, List[int]] = {2: [0, 0], 3: [0, 0], 4: [0, 0]}
@@ -703,6 +721,7 @@ class UTF8IntegrityMetrics(BaseMetrics):
                 d = acc[tok_name][lang]
                 sp = d['splits']
                 mb = d['multibyte']
+                un = d['unaligned']
                 tk = d['tokens']
                 mm = d['mismatches']
 
@@ -712,17 +731,19 @@ class UTF8IntegrityMetrics(BaseMetrics):
                     lang_width[f'{w}_byte'] = {
                         'splits': ws,
                         'total': wt,
-                        'split_rate': ws / wt if wt > 0 else 0.0,
+                        'split_rate': _ratio(ws, wt),
                     }
                     g_width[w][0] += ws
                     g_width[w][1] += wt
 
                 per_lang[lang] = {
-                    'split_rate': sp / mb if mb > 0 else 0.0,
-                    'splits_per_1k_tokens': (sp / tk * 1000) if tk > 0 else 0.0,
-                    'splits_per_1k_multibyte': (sp / mb * 1000) if mb > 0 else 0.0,
+                    'split_rate': _ratio(sp, mb),
+                    'splits_per_1k_tokens': _ratio(sp, tk, 1000),
+                    'splits_per_1k_multibyte': _ratio(sp, mb, 1000),
                     'total_splits': sp,
                     'total_multibyte_chars': mb,
+                    'unaligned_multibyte_chars': un,
+                    'aligned_fraction': _ratio(mb, mb + un),
                     'total_content_tokens': tk,
                     'alignment_mismatches': mm,
                     'per_byte_width': lang_width,
@@ -730,6 +751,7 @@ class UTF8IntegrityMetrics(BaseMetrics):
 
                 g_splits += sp
                 g_mb += mb
+                g_unaligned += un
                 g_tokens += tk
                 g_mismatches += mm
 
@@ -739,16 +761,18 @@ class UTF8IntegrityMetrics(BaseMetrics):
                 global_width[f'{w}_byte'] = {
                     'splits': ws,
                     'total': wt,
-                    'split_rate': ws / wt if wt > 0 else 0.0,
+                    'split_rate': _ratio(ws, wt),
                 }
 
             results['per_tokenizer'][tok_name] = {
                 'global': {
-                    'split_rate': g_splits / g_mb if g_mb > 0 else 0.0,
-                    'splits_per_1k_tokens': (g_splits / g_tokens * 1000) if g_tokens > 0 else 0.0,
-                    'splits_per_1k_multibyte': (g_splits / g_mb * 1000) if g_mb > 0 else 0.0,
+                    'split_rate': _ratio(g_splits, g_mb),
+                    'splits_per_1k_tokens': _ratio(g_splits, g_tokens, 1000),
+                    'splits_per_1k_multibyte': _ratio(g_splits, g_mb, 1000),
                     'total_splits': g_splits,
                     'total_multibyte_chars': g_mb,
+                    'unaligned_multibyte_chars': g_unaligned,
+                    'aligned_fraction': _ratio(g_mb, g_mb + g_unaligned),
                     'total_content_tokens': g_tokens,
                     'alignment_mismatches': g_mismatches,
                     'per_byte_width': global_width,
@@ -757,10 +781,12 @@ class UTF8IntegrityMetrics(BaseMetrics):
             }
 
             results['summary'][tok_name] = {
-                'split_rate': g_splits / g_mb if g_mb > 0 else 0.0,
-                'splits_per_1k_tokens': (g_splits / g_tokens * 1000) if g_tokens > 0 else 0.0,
+                'split_rate': _ratio(g_splits, g_mb),
+                'splits_per_1k_tokens': _ratio(g_splits, g_tokens, 1000),
                 'total_splits': g_splits,
                 'total_multibyte_chars': g_mb,
+                'unaligned_multibyte_chars': g_unaligned,
+                'aligned_fraction': _ratio(g_mb, g_mb + g_unaligned),
                 'languages_analyzed': len(per_lang),
                 'per_byte_width': global_width,
             }
@@ -803,18 +829,22 @@ class UTF8IntegrityMetrics(BaseMetrics):
             for tok_name in self.tokenizer_names:
                 if tok_name in char_split['summary']:
                     s = char_split['summary'][tok_name]
+                    def _fmt(v, spec):
+                        return format(v, spec) if v is not None else 'n/a'
                     print(f"{tok_name}:")
-                    print(f"  {'Split Rate':25}: {s['split_rate']:.4f}")
-                    print(f"  {'Splits/1k Tokens':25}: {s['splits_per_1k_tokens']:.2f}")
+                    print(f"  {'Split Rate':25}: {_fmt(s['split_rate'], '.4f')}")
+                    print(f"  {'Splits/1k Tokens':25}: {_fmt(s['splits_per_1k_tokens'], '.2f')}")
                     print(f"  {'Total Splits':25}: {s['total_splits']:,}")
                     print(f"  {'Multi-byte Chars':25}: {s['total_multibyte_chars']:,}")
+                    print(f"  {'Unaligned Mb Chars':25}: {s.get('unaligned_multibyte_chars', 0):,}")
+                    print(f"  {'Aligned Fraction':25}: {_fmt(s.get('aligned_fraction'), '.4f')}")
                     pw = s.get('per_byte_width', {})
                     for w in (2, 3, 4):
                         wd = pw.get(f'{w}_byte', {})
                         ws = wd.get('splits', 0)
                         wt = wd.get('total', 0)
-                        wr = wd.get('split_rate', 0.0)
-                        print(f"  {f'  {w}-byte splits':25}: {ws:,}/{wt:,} ({wr:.4f})")
+                        wr = wd.get('split_rate')
+                        print(f"  {f'  {w}-byte splits':25}: {ws:,}/{wt:,} ({_fmt(wr, '.4f')})")
                     print(f"  {'Languages':25}: {s['languages_analyzed']}")
 
             print("\n" + "=" * 60)

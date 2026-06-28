@@ -437,11 +437,15 @@ This is distinct from simple byte-fallback tokens. A byte-fallback token like `<
 
 #### Character Boundary Split Count (`utf8_char_split`)
 
-Counts how many multi-byte characters in the source text have their constituent bytes spread across multiple tokens. Reports the split rate (splits / total multi-byte characters) and splits per 1k tokens.
+Counts how many multi-byte characters in the source text have their constituent bytes spread across multiple tokens. To decide this, each token's bytes are reconstructed and aligned to the source text. The split rate is `splits / aligned multi-byte characters`, and splits per 1k tokens is also reported.
 
 **Example:** The Chinese text `你好` contains two 3-byte characters (`你` = `E4 BD A0`, `好` = `E5 A5 BD`). A tokenizer that keeps each character as a single token has 0 splits. A byte-fallback tokenizer that splits `你` into `<0xE4>` | `<0xBD>` | `<0xA0>` has 1 split (the character's bytes span 3 different tokens). The split rate would be 1/2 = 0.5 if `好` remains intact.
 
-**Why it matters:** Split characters are the text-centric complement to the token-centric completeness metric. A tokenizer might have few incomplete tokens overall (high completeness rate) but still split most multi-byte characters because each split produces multiple incomplete tokens — the split count reveals the actual character-level impact.
+**Alignment reliability.** When a tokenizer does not reproduce the source bytes (for example an English-trained tokenizer on Cyrillic or CJK, where some characters are dropped or replaced by placeholders), alignment cannot map every source byte to a token. A multi-byte character with any unaligned byte cannot be classified as split-or-not, so it is excluded from both the numerator and the denominator and counted separately. Three fields report this per language and globally: `unaligned_multibyte_chars` (excluded count), `aligned_fraction` (the share of multi-byte characters that aligned), and `alignment_mismatches` (the raw count of unaligned source bytes). When no multi-byte character aligns, `split_rate`, `splits_per_1k_multibyte`, and the per-byte-width split rates are `null` rather than `0.0`, so "no data" is not read as "no splits". A low `aligned_fraction` means the split rate rests on few characters and should be treated with caution. For tokenizers that reproduce the source exactly (`alignment_mismatches == 0`), every multi-byte character aligns and the split rate is unaffected by this handling.
+
+**Corpus resolution.** The denominator is the number of aligned multi-byte characters in the evaluated text. On ASCII-dominant languages measured on a small parallel corpus this is tiny (the English FLORES sample has 57 multi-byte characters), so `split_rate` takes only a few distinct values and carries little information for Latin-script languages. A corpus with more natural multi-byte content (for example FineWeb2) gives better resolution.
+
+**Why it matters:** Split characters are the text-centric complement to the token-centric completeness metric. A tokenizer might have few incomplete tokens overall (high completeness rate) but still split most multi-byte characters because each split produces multiple incomplete tokens, so the split count reveals the actual character-level impact.
 
 ### Code Tokenization Metrics
 

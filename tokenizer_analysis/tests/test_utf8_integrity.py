@@ -394,7 +394,7 @@ class TestCountSplitCharacters:
         source = b"abc"
         mapping = [0, 1, 2]
         byte_to_token = [0, 0, 0]
-        splits, mb, total, per_width = inst._count_split_characters(
+        splits, mb, total, per_width, unaligned = inst._count_split_characters(
             source, mapping, byte_to_token
         )
         assert splits == 0
@@ -407,7 +407,7 @@ class TestCountSplitCharacters:
         source = b"\xc3\xa9"
         mapping = [0, 1]
         byte_to_token = [0, 0]
-        splits, mb, total, per_width = inst._count_split_characters(
+        splits, mb, total, per_width, unaligned = inst._count_split_characters(
             source, mapping, byte_to_token
         )
         assert splits == 0
@@ -420,7 +420,7 @@ class TestCountSplitCharacters:
         source = b"\xc3\xa9"
         mapping = [0, 1]
         byte_to_token = [0, 1]
-        splits, mb, total, per_width = inst._count_split_characters(
+        splits, mb, total, per_width, unaligned = inst._count_split_characters(
             source, mapping, byte_to_token
         )
         assert splits == 1
@@ -433,7 +433,7 @@ class TestCountSplitCharacters:
         source = b"\xe4\xbd\xa0"
         mapping = [0, 1, 2]
         byte_to_token = [0, 1, 2]
-        splits, mb, total, per_width = inst._count_split_characters(
+        splits, mb, total, per_width, unaligned = inst._count_split_characters(
             source, mapping, byte_to_token
         )
         assert splits == 1
@@ -444,34 +444,41 @@ class TestCountSplitCharacters:
         source = b"\xf0\x9f\x8e\x89"
         mapping = [0, 1, 2, 3]
         byte_to_token = [0, 0, 0, 0]
-        splits, mb, total, per_width = inst._count_split_characters(
+        splits, mb, total, per_width, unaligned = inst._count_split_characters(
             source, mapping, byte_to_token
         )
         assert splits == 0
         assert per_width[4] == (0, 1)
 
-    def test_unmapped_bytes_count_as_split(self, inst):
-        """When some bytes of a multi-byte char are unmapped, treat as split."""
-        # é = C3 A9: first byte mapped (token 0), second byte unmapped
+    def test_partially_unmapped_char_excluded(self, inst):
+        """A char with some bytes unaligned cannot be classified split-or-not,
+        so it is excluded from both numerator and denominator and counted as
+        unaligned. (Previously it was counted as a split, inflating the rate.)"""
+        # é = C3 A9: first byte mapped (token 0), second byte unaligned
         source = b"\xc3\xa9"
         mapping = [0, None]
         byte_to_token = [0]
-        splits, mb, total, per_width = inst._count_split_characters(
-            source, mapping, byte_to_token
-        )
-        assert splits == 1
-        assert mb == 1
-
-    def test_all_bytes_unmapped_no_split(self, inst):
-        """When ALL bytes of a char are unmapped, don't count as split."""
-        source = b"\xc3\xa9"
-        mapping = [None, None]
-        byte_to_token = []
-        splits, mb, total, per_width = inst._count_split_characters(
+        splits, mb, total, per_width, unaligned = inst._count_split_characters(
             source, mapping, byte_to_token
         )
         assert splits == 0
-        assert mb == 1
+        assert mb == 0
+        assert unaligned == 1
+        assert per_width[2] == (0, 0)
+
+    def test_fully_unmapped_char_excluded(self, inst):
+        """A char with all bytes unaligned is excluded from both numerator and
+        denominator. (Previously it stayed in the denominator, deflating the
+        rate.)"""
+        source = b"\xc3\xa9"
+        mapping = [None, None]
+        byte_to_token = []
+        splits, mb, total, per_width, unaligned = inst._count_split_characters(
+            source, mapping, byte_to_token
+        )
+        assert splits == 0
+        assert mb == 0
+        assert unaligned == 1
 
 
 # ===================================================================
@@ -801,3 +808,45 @@ class TestComputeEndToEnd:
         assert pw['2_byte']['splits'] == 0
         assert pw['3_byte']['total'] == 1
         assert pw['3_byte']['splits'] == 1
+
+    def test_alignment_failure_not_counted_as_split(self):
+        """A multi-byte char the tokenizer fails to reproduce is excluded as
+        unaligned, not counted as a split. With no aligned multi-byte char,
+        split_rate is None rather than a fabricated value. Regression for the
+        alignment-failure-as-split bug."""
+        # Source "café"; tokenizer reconstructs only "caf" (é is dropped),
+        # so é's two bytes do not align.
+        tok = MockTokenizer({0: "caf"})
+        prov = MockProvider("drop_tok", tok)
+        metrics = UTF8IntegrityMetrics(prov)
+
+        data = self._make_data("drop_tok", "café", [0])
+        res = metrics.compute(data)['utf8_char_split']
+
+        g = res['per_tokenizer']['drop_tok']['global']
+        assert g['total_splits'] == 0
+        assert g['total_multibyte_chars'] == 0        # é excluded from denominator
+        assert g['unaligned_multibyte_chars'] == 1
+        assert g['split_rate'] is None                # no aligned multi-byte char
+        assert g['aligned_fraction'] == 0.0
+        assert g['alignment_mismatches'] == 2         # é's two unaligned bytes
+
+    def test_split_rate_uses_only_aligned_denominator(self):
+        """When one char aligns (and is split) and another fails to align,
+        split_rate is computed over the aligned char only, and the unaligned
+        char is reported separately."""
+        # 你 (E4 BD A0) split across 3 byte-fallback tokens -> aligned, split.
+        # é is in the source but not reproduced by the tokens -> unaligned.
+        tok = MockTokenizer({0: "<0xE4>", 1: "<0xBD>", 2: "<0xA0>"})
+        prov = MockProvider("mix_align", tok)
+        metrics = UTF8IntegrityMetrics(prov)
+
+        data = self._make_data("mix_align", "你é", [0, 1, 2])
+        g = metrics.compute(data)['utf8_char_split']['per_tokenizer']['mix_align']['global']
+
+        assert g['total_splits'] == 1
+        assert g['total_multibyte_chars'] == 1        # only 你 aligned
+        assert g['unaligned_multibyte_chars'] == 1    # é
+        assert g['split_rate'] == 1.0
+        assert g['aligned_fraction'] == 0.5
+        assert g['alignment_mismatches'] == 2         # é's two bytes
