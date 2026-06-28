@@ -14,15 +14,15 @@ Every column of the candidate and reference intrinsic tables, per FLORES set. Th
 
 **Candidates** (Val/FLORES BPB are downstream-LM extrinsic metrics; `pending`/`—` where not yet run; see the ablations and the extrinsic appendix):
 
-| Tokenizer | Vocab size | Special toks | Eng comp (B/tok) ↑ | Multiling. sent/tok ↑ | Vocab util ↑ | Vocab-util CoV ↓ | Avg langs/token ↑ | Gini ↓ | CER ↓ | Boundary-cross ↓ | Operator-isol ↑ | Enc ms/seq ↓ | Val BPB ↓ | FLORES BPB ↓ |
+| Tokenizer | Vocab size | Special toks | Eng comp (B/tok) ↑ | Multiling. sent/tok ↑ | Vocab util ↑ | Vocab-util CoV ↓ | Avg langs/token ↑ | Gini ↓ | CER ↓ | Boundary-cross ↓ | Operator-isol ↑ | Enc ms/seq ↓ | Val BPB ↓ | FLORES BPB (tr.) ↓ |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| Apertus-pretok + PA-BPE | 127,835 | 4 | 4.336 | **0.0233** | 0.606 | **0.4130** | 2.79 | **0.081** | 0.00043 | 0.02208 | 0.502 | 0.088 | **0.729** | **2.943** |
-| CleanV1-pretok + PA-BPE | 127,835 | 4 | 4.238 | 0.0232 | 0.605 | 0.4138 | 2.79 | **0.081** | 0.00043 | **0.02198** | **0.987** | 0.110 | **0.729** | 2.965 |
-| CleanV2-pretok + PA-BPE | 127,835 | 4 | 4.260 | **0.0233** | 0.607 | 0.4132 | 2.79 | **0.081** | 0.00043 | 0.02200 | **0.987** | 0.107 | **0.729** | 2.953 |
-| CleanV3-pretok + PA-BPE (rebalanced data) | 127,835 | 4 | 4.261 | **0.0233** | **0.625** | 0.4212 | 2.74 | 0.087 | 0.00043 | 0.02699 | **0.987** | **0.064** | **0.729** | 2.979 |
+| Apertus-pretok + PA-BPE | 127,835 | 4 | 4.336 | **0.0233** | 0.606 | **0.4130** | 2.79 | **0.081** | 0.00043 | 0.02208 | 0.502 | 0.088 | **0.729** | 1.170 |
+| CleanV1-pretok + PA-BPE | 127,835 | 4 | 4.238 | 0.0232 | 0.605 | 0.4138 | 2.79 | **0.081** | 0.00043 | **0.02198** | **0.987** | 0.110 | **0.729** | 1.169 |
+| CleanV2-pretok + PA-BPE | 127,835 | 4 | 4.260 | **0.0233** | 0.607 | 0.4132 | 2.79 | **0.081** | 0.00043 | 0.02200 | **0.987** | 0.107 | **0.729** | 1.171 |
+| CleanV3-pretok + PA-BPE (rebalanced data) | 127,835 | 4 | 4.261 | **0.0233** | **0.625** | 0.4212 | 2.74 | 0.087 | 0.00043 | 0.02699 | **0.987** | **0.064** | **0.729** | 1.170 |
 | CleanV3-pretok + PA-BPE (base parity, rebalanced data) | 127,835 | 4 | 3.177 | 0.0217 | 0.559 | 0.4352 | 2.79 | 0.095 | 0.00043 | 0.02810 | 0.986 | 0.067 | — | — |
-| Apertus-pretok + PA-BPE + SuperBPE | 128,000 | 0 | **5.402** | 0.0230 | 0.544 | 0.4992 | **3.14** | 0.110 | 0.00043 | 0.02686 | 0.466 | 0.079 | 0.733 | 3.081 |
-| CleanV1-pretok + PA-BPE + SuperBPE | 128,000 | 0 | 5.013 | 0.0227 | 0.550 | 0.4892 | 3.02 | 0.106 | 0.00043 | 0.02629 | **0.987** | 0.071 | 0.732 | 3.038 |
+| Apertus-pretok + PA-BPE + SuperBPE | 128,000 | 0 | **5.402** | 0.0230 | 0.544 | 0.4992 | **3.14** | 0.110 | 0.00043 | 0.02686 | 0.466 | 0.079 | 0.733 | 1.176 |
+| CleanV1-pretok + PA-BPE + SuperBPE | 128,000 | 0 | 5.013 | 0.0227 | 0.550 | 0.4892 | 3.02 | 0.106 | 0.00043 | 0.02629 | **0.987** | 0.071 | 0.732 | **1.161** |
 
 **Open-source references:**
 

@@ -26,10 +26,10 @@ Tokenizers using the capped regex produce 28 junk tokens, against 64 for the unc
 ![Punctuation/whitespace capping (capped vs uncapped): per-language vocabulary utilization](report_flores60/ablation_plots/punctuation-whitespace-capping-capped-vs-uncapped/vocabulary_utilization_faceted.svg)
 
 *Extrinsic (downstream LM):*
-| Tokenizer | Val BPB ↓ | FLORES BPB ↓ | Code BPB ↓ | MC-math ↑ | MBPP ↑ [95% CI] |
+| Tokenizer | Val BPB ↓ | FLORES BPB (tr.) ↓ | Code BPB ↓ | MC-math ↑ | MBPP ↑ [95% CI] |
 |---|---|---|---|---|---|
-| CleanV1-pretok + PA-BPE [matched] | 0.729 | 2.965 | 0.533 | 0.295 | 0.190 [0.156, 0.226] |
-| PA-Clean-uncapped [matched] | 0.728 | 2.966 | 0.529 | — | — |
+| CleanV1-pretok + PA-BPE [matched] | 0.729 | 1.169 | 0.533 | 0.295 | 0.190 [0.156, 0.226] |
+| PA-Clean-uncapped [matched] | 0.728 | 1.167 | 0.529 | — | — |
 
 ### Parity-aware vs plain BPE
 
@@ -48,10 +48,10 @@ At matched capped settings, parity-aware BPE has a Gini of 0.081 against 0.114 f
 ![Parity-aware vs plain BPE: per-language vocabulary utilization](report_flores60/ablation_plots/parity-aware-vs-plain-bpe/vocabulary_utilization_faceted.svg)
 
 *Extrinsic (downstream LM):*
-| Tokenizer | Val BPB ↓ | FLORES BPB ↓ | Code BPB ↓ | MC-math ↑ | MBPP ↑ [95% CI] |
+| Tokenizer | Val BPB ↓ | FLORES BPB (tr.) ↓ | Code BPB ↓ | MC-math ↑ | MBPP ↑ [95% CI] |
 |---|---|---|---|---|---|
-| CleanV1-pretok + PA-BPE [matched] | 0.729 | 2.965 | 0.533 | 0.295 | 0.190 [0.156, 0.226] |
-| BPE-Clean-uncapped [matched] | 0.716 | 2.654 | 0.523 | 0.270 | 0.148 [0.118, 0.180] |
+| CleanV1-pretok + PA-BPE [matched] | 0.729 | 1.169 | 0.533 | 0.295 | 0.190 [0.156, 0.226] |
+| BPE-Clean-uncapped [matched] | 0.716 | 1.157 | 0.523 | 0.270 | 0.148 [0.118, 0.180] |
 
 *[proxy] tokenizer-lm 1B-balanced Δ, factor: Trainer (BPE vs PA-BPE)* (Δ = B−A; BPB Δ<0 means B better; **bold** = p_adj<0.05):
 | A | B | ΔVal | ΔFLORES (tr.) | ΔFLORES (all) | ΔBLiMP | ΔCode |
@@ -76,12 +76,12 @@ Adding the SuperBPE stage raises Eng B/tok by 18–25% (clean: 4.24 to 5.01; ape
 ![SuperBPE on the PA-BPE candidate base (does SuperBPE help, matched data): per-language compression (sentences/token)](report_flores60/ablation_plots/superbpe-on-the-pa-bpe-candidate-base-does-superbpe-help-mat/compression_rate_faceted.svg)
 
 *Extrinsic (downstream LM):*
-| Tokenizer | Val BPB ↓ | FLORES BPB ↓ | Code BPB ↓ | MC-math ↑ | MBPP ↑ [95% CI] |
+| Tokenizer | Val BPB ↓ | FLORES BPB (tr.) ↓ | Code BPB ↓ | MC-math ↑ | MBPP ↑ [95% CI] |
 |---|---|---|---|---|---|
-| Apertus-pretok + PA-BPE [matched] | 0.729 | 2.943 | 0.531 | 0.270 | 0.058 [0.038, 0.080] |
-| Apertus-pretok + PA-BPE + SuperBPE [matched] | 0.733 | 3.081 | 0.541 | 0.269 | 0.004 [0.000, 0.010] |
-| CleanV1-pretok + PA-BPE [matched] | 0.729 | 2.965 | 0.533 | 0.295 | 0.190 [0.156, 0.226] |
-| CleanV1-pretok + PA-BPE + SuperBPE [matched] | 0.732 | 3.038 | 0.536 | 0.268 | 0.196 [0.162, 0.232] |
+| Apertus-pretok + PA-BPE [matched] | 0.729 | 1.170 | 0.531 | 0.270 | 0.058 [0.038, 0.080] |
+| Apertus-pretok + PA-BPE + SuperBPE [matched] | 0.733 | 1.176 | 0.541 | 0.269 | 0.004 [0.000, 0.010] |
+| CleanV1-pretok + PA-BPE [matched] | 0.729 | 1.169 | 0.533 | 0.295 | 0.190 [0.156, 0.226] |
+| CleanV1-pretok + PA-BPE + SuperBPE [matched] | 0.732 | 1.161 | 0.536 | 0.268 | 0.196 [0.162, 0.232] |
 
 ### Pretokenizer family (apertus vs clean-multi vs gpt4)
 
@@ -100,11 +100,11 @@ clean-multi and apertus are close on multilingual compression and Gini; they dif
 ![Pretokenizer family (apertus vs clean-multi vs gpt4): per-language compression (sentences/token)](report_flores60/ablation_plots/pretokenizer-family-apertus-vs-clean-multi-vs-gpt4/compression_rate_faceted.svg)
 
 *Extrinsic (downstream LM):*
-| Tokenizer | Val BPB ↓ | FLORES BPB ↓ | Code BPB ↓ | MC-math ↑ | MBPP ↑ [95% CI] |
+| Tokenizer | Val BPB ↓ | FLORES BPB (tr.) ↓ | Code BPB ↓ | MC-math ↑ | MBPP ↑ [95% CI] |
 |---|---|---|---|---|---|
-| Apertus-pretok + PA-BPE [matched] | 0.729 | 2.943 | 0.531 | 0.270 | 0.058 [0.038, 0.080] |
-| CleanV1-pretok + PA-BPE [matched] | 0.729 | 2.965 | 0.533 | 0.295 | 0.190 [0.156, 0.226] |
-| PA-gpt4-fineweb2full [matched] | 0.728 | 2.962 | 0.531 | — | — |
+| Apertus-pretok + PA-BPE [matched] | 0.729 | 1.170 | 0.531 | 0.270 | 0.058 [0.038, 0.080] |
+| CleanV1-pretok + PA-BPE [matched] | 0.729 | 1.169 | 0.533 | 0.295 | 0.190 [0.156, 0.226] |
+| PA-gpt4-fineweb2full [matched] | 0.728 | 1.169 | 0.531 | — | — |
 
 *[proxy] tokenizer-lm 1B-balanced Δ, factor: Pretokenizer* (Δ = B−A; BPB Δ<0 means B better; **bold** = p_adj<0.05):
 | A | B | ΔVal | ΔFLORES (tr.) | ΔFLORES (all) | ΔBLiMP | ΔCode |
@@ -131,9 +131,9 @@ Base parity gives an Eng B/tok of 3.13, against 4.24 for hybrid-window, with a l
 ![Hybrid-window vs base parity: per-language compression (sentences/token)](report_flores60/ablation_plots/hybrid-window-vs-base-parity/compression_rate_faceted.svg)
 
 *Extrinsic (downstream LM):*
-| Tokenizer | Val BPB ↓ | FLORES BPB ↓ | Code BPB ↓ | MC-math ↑ | MBPP ↑ [95% CI] |
+| Tokenizer | Val BPB ↓ | FLORES BPB (tr.) ↓ | Code BPB ↓ | MC-math ↑ | MBPP ↑ [95% CI] |
 |---|---|---|---|---|---|
-| CleanV1-pretok + PA-BPE [matched] | 0.729 | 2.965 | 0.533 | 0.295 | 0.190 [0.156, 0.226] |
+| CleanV1-pretok + PA-BPE [matched] | 0.729 | 1.169 | 0.533 | 0.295 | 0.190 [0.156, 0.226] |
 
 *[proxy] tokenizer-lm 1B-balanced Δ, factor: PA-BPE family* (Δ = B−A; BPB Δ<0 means B better; **bold** = p_adj<0.05):
 | A | B | ΔVal | ΔFLORES (tr.) | ΔFLORES (all) | ΔBLiMP | ΔCode |
@@ -159,10 +159,10 @@ The transition (90k to 110k) and the final vocab (128k to 130k) change together,
 ![SuperBPE transition point & vocab size (t90k/128k vs t110k/130k, clean fw2full): per-language compression (sentences/token)](report_flores60/ablation_plots/superbpe-transition-point-vocab-size-t90k-128k-vs-t110k-130k/compression_rate_faceted.svg)
 
 *Extrinsic (downstream LM):*
-| Tokenizer | Val BPB ↓ | FLORES BPB ↓ | Code BPB ↓ | MC-math ↑ | MBPP ↑ [95% CI] |
+| Tokenizer | Val BPB ↓ | FLORES BPB (tr.) ↓ | Code BPB ↓ | MC-math ↑ | MBPP ↑ [95% CI] |
 |---|---|---|---|---|---|
-| CleanV1-pretok + PA-BPE + SuperBPE [matched] | 0.732 | 3.038 | 0.536 | 0.268 | 0.196 [0.162, 0.232] |
-| SuperBPE·clean-cap·hw·fw2full·t110k/130k [matched] | 0.732 | 2.993 | 0.534 | 0.288 | 0.202 [0.168, 0.238] |
+| CleanV1-pretok + PA-BPE + SuperBPE [matched] | 0.732 | 1.161 | 0.536 | 0.268 | 0.196 [0.162, 0.232] |
+| SuperBPE·clean-cap·hw·fw2full·t110k/130k [matched] | 0.732 | 1.161 | 0.534 | 0.288 | 0.202 [0.168, 0.238] |
 
 **Further ablations.** Additional design points, reported in full under *Appendix — additional ablations*:
 - **PA-BPE training-data config (gpt4: balanced vs FineWeb2-full)** — training corpus on a fixed gpt4 pretok (balanced vs FineWeb2-full); FineWeb2-full is far fairer multilingually.
@@ -194,10 +194,10 @@ The further FineWeb2-full to tuned refinements (European ratio up-weighting, two
 ![PA-BPE training-data config (gpt4: balanced vs FineWeb2-full): per-language compression (sentences/token)](report_flores60/ablation_plots/pa-bpe-training-data-config-gpt4-balanced-vs-fineweb2-full/compression_rate_faceted.svg)
 
 *Extrinsic (downstream LM):*
-| Tokenizer | Val BPB ↓ | FLORES BPB ↓ | Code BPB ↓ | MC-math ↑ | MBPP ↑ [95% CI] |
+| Tokenizer | Val BPB ↓ | FLORES BPB (tr.) ↓ | Code BPB ↓ | MC-math ↑ | MBPP ↑ [95% CI] |
 |---|---|---|---|---|---|
-| PA-gpt4-balanced [matched] | 0.719 | 2.662 | 0.524 | — | — |
-| PA-gpt4-fineweb2full [matched] | 0.728 | 2.962 | 0.531 | — | — |
+| PA-gpt4-balanced [matched] | 0.719 | 1.177 | 0.524 | — | — |
+| PA-gpt4-fineweb2full [matched] | 0.728 | 1.169 | 0.531 | — | — |
 
 *[proxy] tokenizer-lm 1B-balanced Δ, factor: Training data* (Δ = B−A; BPB Δ<0 means B better; **bold** = p_adj<0.05):
 | A | B | ΔVal | ΔFLORES (tr.) | ΔFLORES (all) | ΔBLiMP | ΔCode |
@@ -226,9 +226,9 @@ This ablation compares three European-family up-weighting strengths in the parit
 ![Parity tuning — European-family up-weighting (original ×1.0 → ×1.1 → ×1.2): per-language compression (sentences/token)](report_flores60/ablation_plots/parity-tuning-european-family-up-weighting-original-1-0-1-1-/compression_rate_faceted.svg)
 
 *Extrinsic (downstream LM):*
-| Tokenizer | Val BPB ↓ | FLORES BPB ↓ | Code BPB ↓ | MC-math ↑ | MBPP ↑ [95% CI] |
+| Tokenizer | Val BPB ↓ | FLORES BPB (tr.) ↓ | Code BPB ↓ | MC-math ↑ | MBPP ↑ [95% CI] |
 |---|---|---|---|---|---|
-| Apertus-pretok + PA-BPE [matched] | 0.729 | 2.943 | 0.531 | 0.270 | 0.058 [0.038, 0.080] |
+| Apertus-pretok + PA-BPE [matched] | 0.729 | 1.170 | 0.531 | 0.270 | 0.058 [0.038, 0.080] |
 
 ### Tuned config — semitic regroup of script-mismatched languages (with vs without)
 
@@ -246,9 +246,9 @@ This is one of the three tuned fixes, isolated at ×1.2. The effect is local to 
 ![Tuned config — semitic regroup of script-mismatched languages (with vs without): per-language vocabulary utilization](report_flores60/ablation_plots/tuned-config-semitic-regroup-of-script-mismatched-languages-/vocabulary_utilization_faceted.svg)
 
 *Extrinsic (downstream LM):*
-| Tokenizer | Val BPB ↓ | FLORES BPB ↓ | Code BPB ↓ | MC-math ↑ | MBPP ↑ [95% CI] |
+| Tokenizer | Val BPB ↓ | FLORES BPB (tr.) ↓ | Code BPB ↓ | MC-math ↑ | MBPP ↑ [95% CI] |
 |---|---|---|---|---|---|
-| Apertus-pretok + PA-BPE [matched] | 0.729 | 2.943 | 0.531 | 0.270 | 0.058 [0.038, 0.080] |
+| Apertus-pretok + PA-BPE [matched] | 0.729 | 1.170 | 0.531 | 0.270 | 0.058 [0.038, 0.080] |
 
 ### SuperBPE base, transition point & stage-2 preset
 
@@ -267,13 +267,13 @@ This ablation sweeps the SuperBPE base, the stage-1 to stage-2 transition vocab 
 ![SuperBPE base, transition point & stage-2 preset: per-language compression (sentences/token)](report_flores60/ablation_plots/superbpe-base-transition-point-stage-2-preset/compression_rate_faceted.svg)
 
 *Extrinsic (downstream LM):*
-| Tokenizer | Val BPB ↓ | FLORES BPB ↓ | Code BPB ↓ | MC-math ↑ | MBPP ↑ [95% CI] |
+| Tokenizer | Val BPB ↓ | FLORES BPB (tr.) ↓ | Code BPB ↓ | MC-math ↑ | MBPP ↑ [95% CI] |
 |---|---|---|---|---|---|
-| SuperBPE(PA-base)·gpt4o·t90k [matched] | 0.729 | 2.659 | 0.528 | — | — |
-| SuperBPE(PA-base)·gpt4o·t64k [matched] | 0.729 | 2.658 | 0.530 | — | — |
-| SuperBPE(PA-base)·clean-c2·t90k [matched] | 0.729 | 2.656 | 0.526 | — | — |
-| SuperBPE(PA-base)·clean-c3·t90k [matched] | 0.730 | 2.650 | 0.531 | — | — |
-| SuperBPE(plain-base)·gpt4o·noNFC [matched] | 0.724 | 2.645 | 0.525 | — | — |
+| SuperBPE(PA-base)·gpt4o·t90k [matched] | 0.729 | 1.181 | 0.528 | — | — |
+| SuperBPE(PA-base)·gpt4o·t64k [matched] | 0.729 | 1.180 | 0.530 | — | — |
+| SuperBPE(PA-base)·clean-c2·t90k [matched] | 0.729 | 1.169 | 0.526 | — | — |
+| SuperBPE(PA-base)·clean-c3·t90k [matched] | 0.730 | 1.173 | 0.531 | — | — |
+| SuperBPE(plain-base)·gpt4o·noNFC [matched] | 0.724 | 1.173 | 0.525 | — | — |
 
 *[proxy] tokenizer-lm 1B-balanced Δ, factor: SuperBPE* (Δ = B−A; BPB Δ<0 means B better; **bold** = p_adj<0.05):
 | A | B | ΔVal | ΔFLORES (tr.) | ΔFLORES (all) | ΔBLiMP | ΔCode |
@@ -305,9 +305,9 @@ This ablation compares two training corpora under SuperBPE, the balanced mixture
 ![SuperBPE training data (balanced vs FineWeb2-full): per-language compression (sentences/token)](report_flores60/ablation_plots/superbpe-training-data-balanced-vs-fineweb2-full/compression_rate_faceted.svg)
 
 *Extrinsic (downstream LM):*
-| Tokenizer | Val BPB ↓ | FLORES BPB ↓ | Code BPB ↓ | MC-math ↑ | MBPP ↑ [95% CI] |
+| Tokenizer | Val BPB ↓ | FLORES BPB (tr.) ↓ | Code BPB ↓ | MC-math ↑ | MBPP ↑ [95% CI] |
 |---|---|---|---|---|---|
-| SuperBPE(PA-base)·gpt4o·t90k [matched] | 0.729 | 2.659 | 0.528 | — | — |
+| SuperBPE(PA-base)·gpt4o·t90k [matched] | 0.729 | 1.181 | 0.528 | — | — |
 | SuperBPE·gpt4·hw·fw2full [matched] | pending | pending | pending | 0.265 | 0.070 [0.048, 0.092] |
 
 ### Hybrid-window vs base parity, under SuperBPE
@@ -328,10 +328,10 @@ This ablation compares the hybrid-window parity rule against base parity across 
 ![Hybrid-window vs base parity, under SuperBPE: per-language compression (sentences/token)](report_flores60/ablation_plots/hybrid-window-vs-base-parity-under-superbpe/compression_rate_faceted.svg)
 
 *Extrinsic (downstream LM):*
-| Tokenizer | Val BPB ↓ | FLORES BPB ↓ | Code BPB ↓ | MC-math ↑ | MBPP ↑ [95% CI] |
+| Tokenizer | Val BPB ↓ | FLORES BPB (tr.) ↓ | Code BPB ↓ | MC-math ↑ | MBPP ↑ [95% CI] |
 |---|---|---|---|---|---|
-| Apertus-pretok + PA-BPE + SuperBPE [matched] | 0.733 | 3.081 | 0.541 | 0.269 | 0.004 [0.000, 0.010] |
-| CleanV1-pretok + PA-BPE + SuperBPE [matched] | 0.732 | 3.038 | 0.536 | 0.268 | 0.196 [0.162, 0.232] |
+| Apertus-pretok + PA-BPE + SuperBPE [matched] | 0.733 | 1.176 | 0.541 | 0.269 | 0.004 [0.000, 0.010] |
+| CleanV1-pretok + PA-BPE + SuperBPE [matched] | 0.732 | 1.161 | 0.536 | 0.268 | 0.196 [0.162, 0.232] |
 | SuperBPE·gpt4·hw·fw2full [matched] | pending | pending | pending | 0.265 | 0.070 [0.048, 0.092] |
 
 ### Algorithm / pretok (plain BPE vs Unigram, right-align digits, gpt2-style)
@@ -349,11 +349,11 @@ This ablation compares plain-BPE pretokenizer variants (gpt2-style, right-aligne
 ![Algorithm / pretok (plain BPE vs Unigram, right-align digits, gpt2-style): per-language compression (sentences/token)](report_flores60/ablation_plots/algorithm-pretok-plain-bpe-vs-unigram-right-align-digits-gpt/compression_rate_faceted.svg)
 
 *Extrinsic (downstream LM):*
-| Tokenizer | Val BPB ↓ | FLORES BPB ↓ | Code BPB ↓ | MC-math ↑ | MBPP ↑ [95% CI] |
+| Tokenizer | Val BPB ↓ | FLORES BPB (tr.) ↓ | Code BPB ↓ | MC-math ↑ | MBPP ↑ [95% CI] |
 |---|---|---|---|---|---|
-| BPE-gpt2 [matched] | 0.713 | 2.640 | 0.515 | — | — |
-| BPE-rightalign [matched] | 0.712 | 2.644 | 0.519 | 0.295 | 0.062 [0.042, 0.084] |
-| Unigram-gpt4o [matched] | 0.731 | 2.686 | 0.554 | — | — |
+| BPE-gpt2 [matched] | 0.713 | 1.157 | 0.515 | — | — |
+| BPE-rightalign [matched] | 0.712 | 1.160 | 0.519 | 0.295 | 0.062 [0.042, 0.084] |
+| Unigram-gpt4o [matched] | 0.731 | 1.190 | 0.554 | — | — |
 
 *[proxy] tokenizer-lm 1B-balanced Δ, factor: Algorithm* (Δ = B−A; BPB Δ<0 means B better; **bold** = p_adj<0.05):
 | A | B | ΔVal | ΔFLORES (tr.) | ΔFLORES (all) | ΔBLiMP | ΔCode |
@@ -396,9 +396,9 @@ The pretokenizer determines the code impact. clean-multi keeps operators as sepa
 One panel per linguistic family from the PA-BPE *tuned* parity config (`parity_aware_config_grouped_fineweb2full_quota_tuned.json`); each panel plots a metric per language within the family, with one line per tokenizer. Restricted to the 4 candidates, the Apertus baseline, and 5 open-source references. Plots are over the full FLORES devtest set (205 languages), filtered to families with at least 2 languages in that set.
 
 
-**Compression rate (sent/tok, higher = denser)**:
+**Compression rate (sent/tok, higher = better)**:
 
-![Compression rate (sent/tok, higher = denser)](family_plots/compression_rate_by_family.svg)
+![Compression rate (sent/tok, higher = better)](family_plots/compression_rate_by_family.svg)
 
 **Vocabulary utilization (fraction of vocab used, higher = more reuse)**:
 

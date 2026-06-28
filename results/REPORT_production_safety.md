@@ -94,6 +94,10 @@ Thresholds (all corpus-invariant): rate `1` and `5 per million`, survival `0.1`.
 | CleanV3-pretok + PA-BPE (base parity, rebalanced data) | 0.788 | 12.3 | 17.5 | 51.7 | 18.5 | 4.35 |
 | Apertus-pretok + PA-BPE + SuperBPE | 0.928 | 22.0 | 39.0 | 32.5 | 6.5 | 2.27 |
 | CleanV1-pretok + PA-BPE + SuperBPE | 0.932 | 19.3 | 38.4 | 36.3 | 6.0 | 2.48 |
+| preliminary_mul_200k (CleanV2-pretok + PA-BPE, 200k) | 0.808 | 10.6 | 20.9 | 51.5 | 17.0 | 3.56 |
+| preliminary_mul (CleanV3-pretok + PA-BPE, rebalanced) | 0.922 | 15.7 | 29.3 | 48.5 | 6.5 | 3.06 |
+| preliminary_enh (CleanV2-pretok + PA-BPE, English-boosted) | 0.888 | 16.5 | 28.2 | 45.5 | 9.8 | 2.89 |
+| preliminary_euh (CleanV2-pretok + PA-BPE, Fr/De-boosted) | 0.866 | 16.3 | 25.2 | 46.7 | 11.8 | 2.93 |
 | SuperBPE(PA-base)·gpt4o·t90k | 0.889 | 12.2 | 24.8 | 54.0 | 9.0 | 4.01 |
 | SuperBPE(PA-base)·clean-c3·t90k | 0.894 | 12.2 | 25.4 | 53.9 | 8.5 | 4.04 |
 | PA-Clean-uncapped | 0.914 | 16.9 | 32.2 | 43.7 | 7.2 | 3.36 |

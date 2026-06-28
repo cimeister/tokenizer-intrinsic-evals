@@ -23,10 +23,10 @@ Disclaimer: Claude helped compile this report from all of my analyses. All numbe
 
 ## Recommendation
 
-I recommend **CleanV3-pretok + PA-BPE (rebalanced data)** as the headline tokenizer. Against the production Apertus v1 tokenizer it is fairer across languages (Gini, the inequality of per-language encoding cost, 0.087 against 0.205 on FLORES60 and 0.098 against 0.313 on FLORES205; lower is fairer), encodes the full 205-language FLORES set more compactly (sent/tok 0.0204 against 0.0142), and uses 85% of its vocabulary against Apertus's 64%. It matches Apertus on downstream per-byte fit on the training languages (FLORES bits-per-byte 1.170 against 1.168, tied within CI; Val BPB 0.729 against 0.720) and respects code syntax noticeably better (AST boundary alignment 0.688 against 0.488; operator-isolation 0.99 against 0.50).
-MBPP and MC-math have not been measured directly on this tokenizer — its `-mathcode-scratch` LM has not been trained. The closest measured PA-BPE candidate, `CleanV2-pretok + PA-BPE` (which differs from the headline on the pretokenizer V2/V3 axis and the data-config axis but tracks within sampling noise on every other measured metric — Val BPB, FLORES BPB, AST alignment, code BPB, FineWeb-Edu B/tok), achieves MBPP 0.200 [0.156, 0.236] against Apertus's 0.000 [0.000, 0.000] (paired-bootstrap p_BH = 3×10⁻⁴) and MC-math 0.311 against Apertus's 0.257 (Wilson 95% CIs [0.288, 0.335] vs [0.235, 0.279], barely overlapping). The headline's MBPP / MC-math are expected to track these, pending direct measurement.
-The cost vs Apertus is concentrated on English compression and per-byte fit. FineWeb-Edu English: 4.261 B/tok against Apertus's 4.595 (Apertus 7.8% denser). eng_Latn sent/tok on FLORES60: 0.0355 against 0.0377 (Apertus 6.0% denser). Val BPB is 0.009 higher.
-Reference rows in the candidate table below each isolate one axis of the design decision: `CleanV2-pretok + PA-BPE` (V2/V3 + tuned/rebalanced; cited above as the MBPP/MC-math proxy), `Apertus-pretok + PA-BPE` (pretokenizer axis — same algorithm + data, only the regex differs; MBPP 0.058), `Apertus-pretok + PA-BPE (untuned data)` (data-config axis within Apertus-pretok), `CleanV1-pretok + PA-BPE + SuperBPE` (SuperBPE algorithm-axis), and `CleanV3-pretok + plain BPE` (plain-BPE algorithm-axis control at fixed pretokenizer).
+I recommend **preliminary_mul_200k** (previously CleanV2-pretok + PA-BPE, at 200k vocabulary) as the headline tokenizer. The four current candidates are the clean PA-BPE family carried forward: `preliminary_mul` is CleanV3-pretok + PA-BPE (rebalanced); `preliminary_enh`, `preliminary_euh`, and `preliminary_mul_200k` are CleanV2-pretok + PA-BPE with English-boosted, Fr/De-boosted, and 200k variants.
+Against the production Apertus v1 tokenizer, on the broad FLORES set `preliminary_mul_200k` compresses more (sent/tok 0.0239 against 0.0198) and is fairer across languages (Gini, the inequality of per-language encoding cost, 0.118 against 0.205; lower is fairer); on the full 205-language FLORES set its worst-language factor is the smallest of the set (3.61x against 14.70x, the multiplicative token-count increase between the worst-served language and English). It has the highest European compression of the candidates (FLORES European average 4.245 bytes/token against Apertus's 3.865) while keeping English close to Apertus (FineWeb-Edu 4.51 against 4.60 bytes/token). It aligns to code structure far better (AST boundary alignment 0.681 against 0.488; operator-isolation 0.99 against 0.50).
+The cost is vocabulary size: 200000 against the 131072 of Apertus v1 and the other three candidates, a 53% larger embedding and output table. At 1B parameters this does not cost downstream per-byte fit on the training languages: on the 31 training languages `preliminary_mul_200k` matches Apertus v1 on validation BPB (0.720 against 0.720) and has the lowest trained-FLORES BPB of the candidates and the baseline (1.163, against 1.164 to 1.167 for the 131k candidates and 1.168 for Apertus v1). Downstream comparisons here use only the 31 training languages (trained-FLORES or validation BPB); the full 214-language FLORES set is not used because most of those languages were not in the training data.
+If a 131k vocabulary is required (to match Apertus v1's embedding table), the three 131k candidates each lead on one axis: `preliminary_mul` is the fairest and most balanced, `preliminary_euh` has the highest European compression, and `preliminary_enh` the highest English compression. The detailed four-way comparison, including the intrinsic plots, is in `REPORT_focus_candidates.md` (apertus-tokenizer-development).
 Disqualified by a production-safety fail: Gemma 3, EuroLLM (see *Production-safety gates*).
 
 ## Metric guide
@@ -48,17 +48,15 @@ The recommended tokenizers and the current Apertus production baseline, on the d
 
 | Tokenizer | Role | Multiling. sent/tok ↑ | Gini ↓ | Vocab-util CoV ↓ | Avg langs/token ↑ | Eng B/tok ↑ | Vocab util ↑ | AST align ↑ | Val BPB ↓ | FLORES BPB (trained) [95% CI] ↓ | FLORES BPB σ (trained) ↓ | MC-math ↑ | MBPP ↑ [95% CI] | Gate |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| CleanV3-pretok + PA-BPE (rebalanced data) | headline | 0.0233 | 0.087 | 0.4212 | 2.74 | 4.26 | 0.625 | 0.688 | 0.729 | 1.170 [1.063, 1.277] | 0.304 | — | — | warn |
-| CleanV2-pretok + PA-BPE | ref: closest measured PA-BPE peer (cites MBPP / MC-math) | 0.0233 | 0.081 | 0.4132 | 2.79 | 4.26 | 0.607 | 0.686 | 0.729 | 1.171 [1.063, 1.278] | 0.307 | 0.311 | 0.200 [0.166, 0.236] | warn |
-| Apertus-pretok + PA-BPE | ref: pretokenizer-axis foil | 0.0233 | 0.081 | 0.4130 | 2.79 | 4.34 | 0.606 | 0.551 | 0.729 | 1.170 [1.064, 1.277] | 0.303 | 0.270 | 0.058 [0.038, 0.080] | warn |
-| Apertus-pretok + PA-BPE (untuned data) | ref: data-axis foil (untuned) | 0.0233 | 0.075 | 0.3860 | 2.84 | 4.33 | 0.592 | 0.551 | — | — | — | — | — | warn |
-| CleanV1-pretok + PA-BPE + SuperBPE | ref: SuperBPE algorithm-axis | 0.0227 | 0.106 | 0.4892 | 3.02 | 5.01 | 0.550 | 0.641 | 0.732 | 1.161 [1.056, 1.266] | 0.299 | 0.268 | 0.196 [0.162, 0.232] | warn |
-| CleanV3-pretok + plain BPE | ref: plain-BPE algorithm-axis control | 0.0228 | 0.114 | 0.4918 | 2.83 | 4.45 | 0.615 | 0.683 | — | — | — | — | — | warn |
+| preliminary_mul_200k (CleanV2-pretok + PA-BPE, 200k) | headline (200k) | 0.0239 | 0.118 | 0.5041 | 2.28 | 4.51 | 0.545 | 0.681 | 0.720 | 1.163 [1.057, 1.269] | 0.302 | 0.247 | pending | warn |
+| preliminary_mul (CleanV3-pretok + PA-BPE, rebalanced) | 131k candidate: fairest / most balanced | 0.0235 | 0.088 | 0.4180 | 2.67 | 4.33 | 0.639 | 0.689 | 0.728 | 1.167 [1.061, 1.274] | 0.302 | — | — | warn |
+| preliminary_enh (CleanV2-pretok + PA-BPE, English-boosted) | 131k candidate: highest English compression | 0.0223 | 0.121 | 0.5320 | 2.75 | 4.49 | 0.598 | 0.679 | 0.725 | 1.164 [1.057, 1.271] | 0.304 | 0.273 | pending | warn |
+| preliminary_euh (CleanV2-pretok + PA-BPE, Fr/De-boosted) | 131k candidate: highest European compression | 0.0219 | 0.138 | 0.5852 | 2.68 | 4.42 | 0.621 | 0.682 | 0.725 | 1.167 [1.060, 1.275] | 0.305 | 0.279 | pending | warn |
 | Apertus v1 (production) | comparator (production) | 0.0198 | 0.205 | 0.5133 | 2.86 | 4.60 | 0.561 | 0.488 | 0.720 | 1.168 [1.063, 1.272] | 0.297 | 0.257 | 0.000 [0.000, 0.000] | warn |
 
 `warn` is advisory: for NFC tokenizers exact-match below 1.0 is canonical re-spelling, not loss. MBPP has a paired-bootstrap 95% CI; MC-math is a single run.
 
-Across the 11 tokenizers with both numbers, Spearman ρ(AST align, MBPP) = +0.718 (p = 0.013). AST alignment is on StarCoder snippets (multi-language); MBPP is Python pass-rate at 1B tokens, so the relationship is indicative, not a guarantee.
+Across the 14 tokenizers with both numbers, Spearman ρ(AST align, MBPP) = +0.657 (p = 0.011). AST alignment is on StarCoder snippets (multi-language); MBPP is Python pass-rate at 1B tokens, so the relationship is indicative, not a guarantee.
 
 ### Candidates and references across FLORES sets
 
@@ -119,7 +117,7 @@ Tokenizer-design jargon used throughout this report. Full definitions of the met
 - **StarCoder** — multi-language code corpus (19 languages) used for AST boundary alignment analysis.
 
 **Intrinsic metrics**
-- **sent/tok** — FLORES sentences per token. Higher = denser encoding.
+- **sent/tok** — FLORES sentences per token. Higher = higher compression rate.
 - **Gini** — inequality in per-language encoding cost. 0 = every language costs the same per byte; 1 = one language monopolises all the merges. Lower is fairer.
 - **Vocab-util / vocab utilization** — fraction of the 128k vocab actually emitted by at least one language. Higher = more vocab slots doing productive work.
 - **Vocab-util CoV** — coefficient of variation in per-language vocab usage. Lower = vocab is exercised more evenly across languages.
@@ -242,6 +240,10 @@ In every preset the math and code groups are heuristically fixed at `ratio` 1.0,
 | Llama 4 | Reference | production: meta-llama/Llama-4-Scout-17B-16E-Instruct (via open mirror unsloth/...) | — | — | — | — | — |
 | OLMo 2 | Reference | production: allenai/OLMo-2-1124-7B (OLMo-3 not yet on HF) | — | — | — | — | — |
 | K2 Think | Reference | production: LLM360/K2-Think | — | — | — | — | — |
+| preliminary_mul_200k (CleanV2-pretok + PA-BPE, 200k) | Candidate | Parity-aware BPE | hybrid-window | clean-multi-plus2 + repcap8 | NFC | capped | FineWeb2-full (consv2 eusino_v2c + frde_kr120; vocab 200k) |
+| preliminary_mul (CleanV3-pretok + PA-BPE, rebalanced) | Candidate | Parity-aware BPE | hybrid-window | clean-multi-plus3 + repcap8 | NFC | capped | FineWeb2-full (consv2 reparam) |
+| preliminary_enh (CleanV2-pretok + PA-BPE, English-boosted) | Candidate | Parity-aware BPE | hybrid-window | clean-multi-plus2 + repcap8 | NFC | capped | FineWeb2-full (consv2 engfull_eu3) |
+| preliminary_euh (CleanV2-pretok + PA-BPE, Fr/De-boosted) | Candidate | Parity-aware BPE | hybrid-window | clean-multi-plus2 + repcap8 | NFC | capped | FineWeb2-full (consv2 frde2) |
 | SuperBPE(PA-base)·gpt4o·t90k | Ablation | SuperBPE | PA-BPE base (gpt4) | gpt4o + gpt4o-reduced | NFC | — | balanced; transition 90k |
 | SuperBPE(PA-base)·clean-c3·t90k | Ablation | SuperBPE | PA-BPE base (clean-multi) | clean-multi C3 | NFC | — | balanced; transition 90k |
 | PA-Clean-uncapped | Ablation | Parity-aware BPE | hybrid-window | clean-multi | NFC | uncapped | FineWeb2-full |
@@ -276,58 +278,70 @@ Small transformers trained from scratch on each tokenizer (companion `tokenizer-
 - **Budgets:** distributional/linguistic metrics from the **10B** balanced run (`full-128k-<slug>`, step ~8800); math+code from the **20B** math+code-from-scratch run (`-mathcode-scratch`, step 19073). The 10B-vs-20B table below justifies reading BPB/MC rankings off 10B for the bulk of the panel.
 - **Metric notes:** BPB (bits-per-byte) is tokenizer-independent and zero-variance. Generative tasks (GSM8K/HumanEval/MBPP) are noisy single-run point estimates. **MBPP** separates the candidates (apertus≪clean, paired-bootstrap p_BH<0.001); **GSM8K-flexible and HumanEval do not separate them** even at 20B; HumanEval additionally sits on a greedy-decoding repetition floor (~50–65% of generations degenerate across all runs). Treat generative numbers as directional.
 
+**Trends across design choices** (downstream, about 1B parameters; bits-per-byte is read on the 31 training languages only, via validation BPB or trained-FLORES BPB, because the full 214-language FLORES set contains languages absent from training):
+- **Algorithm:** plain BPE beats Unigram on validation BPB by about 0.02 to 0.03 bits/byte. Parity-aware BPE costs about 0.02 bits/byte (roughly 3%) on validation BPB against the best plain-BPE pretokenizer, in exchange for higher cross-language fairness and better code-structure alignment. SuperBPE leads MBPP in the 20B math+code regime (clean pretokenizer about 0.20 against about 0.02 for the gpt4o-balanced baseline).
+- **Pretokenizer:** on validation BPB the order is gpt4o > claude ~ right-aligned > punctuation > whitespace > apertus. For code generation (MBPP) the clean regex beats the apertus pretokenizer by a wide margin: the apertus regex fuses newlines into multi-line tokens the model fails to reproduce, so pretokenizer choice matters more than algorithm for code.
+- **Refinements:** NFC normalization makes no measurable validation-BPB difference. The plus3/repcap8 pretokenizer and capping/hybrid-window are the refinements the candidate family adopted over the CleanV1 base. GSM8K and HumanEval sit near the 1B noise floor and do not separate the candidates.
+
 **Full per-tokenizer results** (point estimates; `[matched]`/`[proxy]`/`pending`/`—` as in the ablations; MBPP/GSM8K/HumanEval 95% CIs in `bootstrap_mathcode_significance.json`, MBPP CI shown with the ablations). **BLiMP is Option-B (BOS / empty-context) scoring for all rows.** The main eval files mix Option-A and Option-B, which are not comparable, so only Option-B is reported; `optA-only` flags a run that has no Option-B eval (its Option-A value is omitted, not substituted):
-| Tokenizer | Val BPB ↓ | FLORES all [95% CI] ↓ | FLORES all σ ↓ | FLORES tr [95% CI] ↓ | FLORES tr σ ↓ | Code BPB ↓ | BLiMP ↑ | MultiBLiMP ↑ | MGSM ↑ | MC-math ↑ | GSM8K ↑ | HumanEval ↑ | MBPP ↑ |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| Apertus-pretok + PA-BPE [matched] | 0.729 | 2.943 [2.793, 3.093] | 1.119 | 1.170 [1.064, 1.277] | 0.303 | 0.531 | 0.819 | 0.916 | 0.015 | 0.270 | 0.240 | 0.049 | 0.058 |
-| CleanV1-pretok + PA-BPE [matched] | 0.729 | 2.965 [2.812, 3.118] | 1.141 | 1.169 [1.061, 1.277] | 0.306 | 0.533 | 0.816 | 0.919 | 0.013 | 0.295 | 0.232 | 0.055 | 0.190 |
-| CleanV2-pretok + PA-BPE [matched] | 0.729 | 2.953 [2.801, 3.104] | 1.129 | 1.171 [1.063, 1.278] | 0.307 | 0.534 | 0.819 | 0.920 | 0.012 | 0.311 | 0.226 | 0.043 | 0.200 |
-| CleanV3-pretok + PA-BPE (rebalanced data) [matched] | 0.729 | 2.979 [2.825, 3.133] | 1.151 | 1.170 [1.063, 1.277] | 0.304 | 0.534 | 0.824 | 0.917 | 0.015 | — | — | — | — |
-| Apertus-pretok + PA-BPE + SuperBPE [matched] | 0.733 | 3.081 [2.920, 3.241] | 1.198 | 1.176 [1.069, 1.283] | 0.304 | 0.541 | 0.815 | 0.912 | 0.011 | 0.269 | 0.198 | 0.055 | 0.004 |
-| CleanV1-pretok + PA-BPE + SuperBPE [matched] | 0.732 | 3.038 [2.879, 3.197] | 1.188 | 1.161 [1.056, 1.266] | 0.299 | 0.536 | 0.814 | 0.920 | 0.010 | 0.268 | 0.222 | 0.073 | 0.196 |
-| Apertus v1 (production) [matched] | 0.720 | 2.768 [2.632, 2.904] | 1.015 | 1.168 [1.063, 1.272] | 0.297 | 0.526 | 0.819 | 0.914 | 0.012 | 0.257 | 0.228 | 0.030 | 0.000 |
-| BPE-Clean-uncapped [matched] | 0.716 | 2.654 [2.517, 2.791] | 1.022 | 1.157 [1.052, 1.261] | 0.296 | 0.523 | 0.821 | 0.910 | 0.012 | 0.270 | 0.216 | 0.018 | 0.148 |
-| BPE-Punct [matched] | 0.717 | 2.647 [2.511, 2.784] | 1.016 | 1.161 [1.059, 1.263] | 0.290 | 0.527 | 0.814 | 0.911 | 0.007 | — | — | — | — |
-| BPE-gpt2 [matched] | 0.713 | 2.640 [2.505, 2.776] | 1.014 | 1.157 [1.056, 1.258] | 0.287 | 0.515 | 0.816 | 0.909 | 0.012 | — | — | — | — |
-| BPE-gpt4o-balanced [matched] | 0.711 | 2.639 [2.503, 2.775] | 1.015 | 1.157 [1.054, 1.260] | 0.293 | 0.518 | 0.817 | 0.917 | 0.009 | — | — | — | — |
-| BPE-gpt4o-balanced-NFC [matched] | 0.711 | 2.637 [2.500, 2.774] | 1.022 | 1.154 [1.049, 1.259] | 0.297 | 0.519 | 0.813 | 0.916 | 0.011 | — | — | — | — |
-| BPE-rightalign [matched] | 0.712 | 2.644 [2.508, 2.780] | 1.016 | 1.160 [1.057, 1.264] | 0.293 | 0.519 | 0.816 | 0.912 | 0.012 | 0.295 | 0.252 | 0.061 | 0.062 |
-| PA-Clean-balanced-hw [matched] | pending | pending | pending | pending | pending | pending | pending | pending | pending | — | — | — | — |
-| PA-Clean-plus2-A8 [matched] | 0.726 | 2.989 [2.836, 3.142] | 1.140 | 1.165 [1.058, 1.271] | 0.302 | 0.528 | 0.819 | 0.915 | pending | — | — | — | — |
-| PA-Clean-plus3-A6 [matched] | 0.728 | 2.975 [2.824, 3.127] | 1.129 | 1.166 [1.059, 1.273] | 0.303 | 0.529 | 0.821 | 0.909 | pending | — | — | — | — |
-| PA-Clean-plus3-A8 [matched] | 0.726 | 2.964 [2.815, 3.113] | 1.114 | 1.165 [1.058, 1.271] | 0.302 | 0.529 | 0.813 | 0.910 | pending | 0.312 | 0.222 | 0.110 | 0.168 |
-| PA-Clean-uncapped [matched] | 0.728 | 2.966 [2.812, 3.119] | 1.146 | 1.167 [1.061, 1.274] | 0.303 | 0.529 | 0.818 | 0.917 | 0.009 | — | — | — | — |
-| PA-gpt4-balanced [matched] | 0.719 | 2.662 [2.527, 2.797] | 1.007 | 1.177 [1.071, 1.282] | 0.300 | 0.524 | 0.816 | 0.914 | 0.011 | — | — | — | — |
-| PA-gpt4-fineweb2full [matched] | 0.728 | 2.962 [2.808, 3.116] | 1.147 | 1.169 [1.062, 1.275] | 0.303 | 0.531 | 0.827 | 0.914 | 0.012 | — | — | — | — |
-| SuperBPE(PA-base)·clean-c2·t90k [matched] | 0.729 | 2.656 [2.521, 2.792] | 1.012 | 1.169 [1.066, 1.272] | 0.294 | 0.526 | 0.811 | 0.911 | 0.007 | — | — | — | — |
-| SuperBPE(PA-base)·clean-c3·t90k [matched] | 0.730 | 2.650 [2.515, 2.784] | 1.006 | 1.173 [1.069, 1.277] | 0.295 | 0.531 | 0.803 | 0.919 | 0.007 | — | — | — | — |
-| SuperBPE·clean-cap·hw·fw2full·t110k/130k [matched] | 0.732 | 2.993 [2.836, 3.150] | 1.171 | 1.161 [1.055, 1.266] | 0.300 | 0.534 | 0.821 | 0.912 | 0.008 | 0.288 | 0.236 | 0.104 | 0.202 |
-| SuperBPE·gpt4·hw·fw2full [matched] | pending | pending | pending | pending | pending | pending | pending | pending | pending | 0.265 | 0.198 | 0.085 | 0.070 |
-| SuperBPE(PA-base)·gpt4o·t64k [matched] | 0.729 | 2.658 [2.523, 2.794] | 1.012 | 1.180 [1.076, 1.284] | 0.295 | 0.530 | 0.792 | 0.920 | 0.006 | — | — | — | — |
-| SuperBPE(PA-base)·gpt4o·t90k [matched] | 0.729 | 2.659 [2.523, 2.794] | 1.008 | 1.181 [1.077, 1.284] | 0.294 | 0.528 | 0.801 | 0.916 | 0.006 | — | — | — | — |
-| SuperBPE(plain-base)·gpt4o·noNFC [matched] | 0.724 | 2.645 [2.510, 2.781] | 1.012 | 1.173 [1.069, 1.278] | 0.297 | 0.525 | 0.804 | 0.909 | 0.004 | — | — | — | — |
-| SuperBPE-plus2v2-cv2-t110k [matched] | 0.732 | 3.065 [2.903, 3.227] | 1.210 | 1.163 [1.058, 1.268] | 0.300 | 0.535 | 0.818 | 0.912 | pending | — | — | — | — |
-| Unigram-gpt4o [matched] | 0.731 | 2.686 [2.551, 2.821] | 1.008 | 1.190 [1.084, 1.297] | 0.303 | 0.554 | 0.833 | 0.911 | 0.015 | — | — | — | — |
+| Tokenizer | Val BPB ↓ | FLORES tr [95% CI] ↓ | FLORES tr σ ↓ | Code BPB ↓ | BLiMP ↑ | MultiBLiMP ↑ | MGSM ↑ | MC-math ↑ | GSM8K ↑ | HumanEval ↑ | MBPP ↑ |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| Apertus-pretok + PA-BPE [matched] | 0.729 | 1.170 [1.064, 1.277] | 0.303 | 0.531 | 0.819 | 0.916 | 0.015 | 0.270 | 0.240 | 0.049 | 0.058 |
+| CleanV1-pretok + PA-BPE [matched] | 0.729 | 1.169 [1.061, 1.277] | 0.306 | 0.533 | 0.816 | 0.919 | 0.013 | 0.295 | 0.232 | 0.055 | 0.190 |
+| CleanV2-pretok + PA-BPE [matched] | 0.729 | 1.171 [1.063, 1.278] | 0.307 | 0.534 | 0.819 | 0.920 | 0.012 | 0.311 | 0.226 | 0.043 | 0.200 |
+| CleanV3-pretok + PA-BPE (rebalanced data) [matched] | 0.729 | 1.170 [1.063, 1.277] | 0.304 | 0.534 | 0.824 | 0.917 | 0.015 | — | — | — | — |
+| Apertus-pretok + PA-BPE + SuperBPE [matched] | 0.733 | 1.176 [1.069, 1.283] | 0.304 | 0.541 | 0.815 | 0.912 | 0.011 | 0.269 | 0.198 | 0.055 | 0.004 |
+| CleanV1-pretok + PA-BPE + SuperBPE [matched] | 0.732 | 1.161 [1.056, 1.266] | 0.299 | 0.536 | 0.814 | 0.920 | 0.010 | 0.268 | 0.222 | 0.073 | 0.196 |
+| Apertus v1 (production) [matched] | 0.720 | 1.168 [1.063, 1.272] | 0.297 | 0.526 | 0.819 | 0.914 | 0.012 | 0.257 | 0.228 | 0.030 | 0.000 |
+| BPE-Clean-uncapped [matched] | 0.716 | 1.157 [1.052, 1.261] | 0.296 | 0.523 | 0.821 | 0.910 | 0.012 | 0.270 | 0.216 | 0.018 | 0.148 |
+| BPE-Punct [matched] | 0.717 | 1.161 [1.059, 1.263] | 0.290 | 0.527 | 0.814 | 0.911 | 0.007 | — | — | — | — |
+| BPE-gpt2 [matched] | 0.713 | 1.157 [1.056, 1.258] | 0.287 | 0.515 | 0.816 | 0.909 | 0.012 | — | — | — | — |
+| BPE-gpt4o-balanced [matched] | 0.711 | 1.157 [1.054, 1.260] | 0.293 | 0.518 | 0.817 | 0.917 | 0.009 | — | — | — | — |
+| BPE-gpt4o-balanced-NFC [matched] | 0.711 | 1.154 [1.049, 1.259] | 0.297 | 0.519 | 0.813 | 0.916 | 0.011 | — | — | — | — |
+| BPE-rightalign [matched] | 0.712 | 1.160 [1.057, 1.264] | 0.293 | 0.519 | 0.816 | 0.912 | 0.012 | 0.295 | 0.252 | 0.061 | 0.062 |
+| PA-Clean-balanced-hw [matched] | pending | pending | pending | pending | pending | pending | pending | — | — | — | — |
+| PA-Clean-plus2-A8 [matched] | 0.726 | 1.165 [1.058, 1.271] | 0.302 | 0.528 | 0.819 | 0.915 | pending | — | — | — | — |
+| PA-Clean-plus3-A6 [matched] | 0.728 | 1.166 [1.059, 1.273] | 0.303 | 0.529 | 0.821 | 0.909 | pending | — | — | — | — |
+| PA-Clean-plus3-A8 [matched] | 0.726 | 1.165 [1.058, 1.271] | 0.302 | 0.529 | 0.813 | 0.910 | pending | 0.312 | 0.222 | 0.110 | 0.168 |
+| PA-Clean-plus3-repcap8fr-A8 [matched] | 0.726 | 1.162 [1.056, 1.268] | 0.302 | 0.527 | 0.824 | 0.913 | pending | — | — | — | — |
+| PA-Clean-plus3-repcap8fr-cv2 [matched] | 0.728 | 1.167 [1.060, 1.274] | 0.303 | 0.532 | 0.821 | 0.920 | 0.015 | — | — | — | — |
+| PA-Clean-uncapped [matched] | 0.728 | 1.167 [1.061, 1.274] | 0.303 | 0.529 | 0.818 | 0.917 | 0.009 | — | — | — | — |
+| PA-gpt4-balanced [matched] | 0.719 | 1.177 [1.071, 1.282] | 0.300 | 0.524 | 0.816 | 0.914 | 0.011 | — | — | — | — |
+| PA-gpt4-fineweb2full [matched] | 0.728 | 1.169 [1.062, 1.275] | 0.303 | 0.531 | 0.827 | 0.914 | 0.012 | — | — | — | — |
+| SuperBPE(PA-base)·clean-c2·t90k [matched] | 0.729 | 1.169 [1.066, 1.272] | 0.294 | 0.526 | 0.811 | 0.911 | 0.007 | — | — | — | — |
+| SuperBPE(PA-base)·clean-c3·t90k [matched] | 0.730 | 1.173 [1.069, 1.277] | 0.295 | 0.531 | 0.803 | 0.919 | 0.007 | — | — | — | — |
+| SuperBPE·clean-cap·hw·fw2full·t110k/130k [matched] | 0.732 | 1.161 [1.055, 1.266] | 0.300 | 0.534 | 0.821 | 0.912 | 0.008 | 0.288 | 0.236 | 0.104 | 0.202 |
+| SuperBPE·gpt4·hw·fw2full [matched] | pending | pending | pending | pending | pending | pending | pending | 0.265 | 0.198 | 0.085 | 0.070 |
+| SuperBPE(PA-base)·gpt4o·t64k [matched] | 0.729 | 1.180 [1.076, 1.284] | 0.295 | 0.530 | 0.792 | 0.920 | 0.006 | — | — | — | — |
+| SuperBPE(PA-base)·gpt4o·t90k [matched] | 0.729 | 1.181 [1.077, 1.284] | 0.294 | 0.528 | 0.801 | 0.916 | 0.006 | — | — | — | — |
+| SuperBPE(plain-base)·gpt4o·noNFC [matched] | 0.724 | 1.173 [1.069, 1.278] | 0.297 | 0.525 | 0.804 | 0.909 | 0.004 | — | — | — | — |
+| SuperBPE-plus2v2-cv2-t110k [matched] | 0.732 | 1.163 [1.058, 1.268] | 0.300 | 0.535 | 0.818 | 0.912 | pending | — | — | — | — |
+| Unigram-gpt4o [matched] | 0.731 | 1.190 [1.084, 1.297] | 0.303 | 0.554 | 0.833 | 0.911 | 0.015 | — | — | — | — |
+| preliminary_enh (CleanV2-pretok + PA-BPE, English-boosted) [matched] | 0.725 | 1.164 [1.057, 1.271] | 0.304 | 0.529 | 0.820 | 0.911 | 0.016 | 0.273 | 0.242 | 0.079 | 0.154 |
+| preliminary_euh (CleanV2-pretok + PA-BPE, Fr/De-boosted) [matched] | 0.725 | 1.167 [1.060, 1.275] | 0.305 | 0.532 | 0.820 | 0.915 | 0.011 | 0.279 | 0.236 | 0.116 | 0.102 |
+| preliminary_mul (CleanV3-pretok + PA-BPE, rebalanced) [matched] | 0.728 | 1.167 [1.061, 1.274] | 0.302 | 0.531 | 0.814 | 0.919 | 0.014 | — | — | — | — |
+| preliminary_mul_200k (CleanV2-pretok + PA-BPE, 200k) [matched] | 0.720 | 1.163 [1.057, 1.269] | 0.302 | 0.524 | 0.821 | 0.917 | 0.010 | 0.247 | 0.240 | 0.073 | 0.206 |
 
 **10B vs 20B stability (balanced mixture).** Five tokenizers continued from their 10B checkpoint for +10B on the same data. BPB ↓ better; BLiMP/GSM8K/HumanEval/MBPP/MGSM ↑ better. This is the justification for reporting most runs at 10B: **BPB/code-BPB rankings are budget-stable, generative-task rankings are not** (single runs, no CIs). BLiMP is Option-B (BOS) scoring; the 20B *-continue* runs have no Option-B eval, shown `—`.
-| Tokenizer | Budget | Val BPB ↓ | FLORES ↓ | BLiMP ↑ | Code BPB ↓ | GSM8K ↑ | HEval ↑ | MBPP ↑ | MGSM ↑ |
+| Tokenizer | Budget | Val BPB ↓ | FLORES tr ↓ | BLiMP ↑ | Code BPB ↓ | GSM8K ↑ | HEval ↑ | MBPP ↑ | MGSM ↑ |
 |---|---|---|---|---|---|---|---|---|---|
-| gpt4o-balanced | 10B | 0.711 | 2.64 | 0.817 | 0.518 | 0.046 | 0.006 | 0.030 | 0.009 |
-| gpt4o-balanced | 20B | 0.698 | 2.62 | 0.813 | 0.507 | 0.056 | 0.024 | 0.052 | 0.017 |
-| rightalign-balanced | 10B | 0.712 | 2.64 | 0.816 | 0.519 | 0.041 | 0.024 | 0.052 | 0.012 |
-| rightalign-balanced | 20B | 0.698 | 2.63 | 0.824 | 0.508 | 0.065 | 0.037 | 0.060 | 0.014 |
-| claude-balanced-nfc | 10B | 0.714 | 2.64 | 0.823 | 0.518 | 0.037 | 0.043 | 0.056 | 0.012 |
-| claude-balanced-nfc | 20B | 0.701 | 2.65 | 0.820 | 0.509 | 0.056 | 0.012 | 0.070 | 0.006 |
-| llama3 | 10B | 0.718 | 2.66 | 0.820 | 0.548 | 0.038 | 0.006 | 0.042 | 0.008 |
-| llama3 | 20B | 0.704 | 2.67 | 0.820 | 0.560 | 0.055 | 0.006 | 0.060 | 0.005 |
-| gpt4o-code | 10B | 0.724 | 2.63 | 0.821 | 0.543 | 0.046 | 0.018 | 0.020 | 0.011 |
-| gpt4o-code | 20B | 0.709 | 2.60 | 0.827 | 0.545 | 0.064 | 0.024 | 0.028 | 0.011 |
+| gpt4o-balanced | 10B | 0.711 | 1.16 | 0.817 | 0.518 | 0.046 | 0.006 | 0.030 | 0.009 |
+| gpt4o-balanced | 20B | 0.698 | 1.14 | 0.813 | 0.507 | 0.056 | 0.024 | 0.052 | 0.017 |
+| rightalign-balanced | 10B | 0.712 | 1.16 | 0.816 | 0.519 | 0.041 | 0.024 | 0.052 | 0.012 |
+| rightalign-balanced | 20B | 0.698 | 1.14 | 0.824 | 0.508 | 0.065 | 0.037 | 0.060 | 0.014 |
+| claude-balanced-nfc | 10B | 0.714 | 1.15 | 0.823 | 0.518 | 0.037 | 0.043 | 0.056 | 0.012 |
+| claude-balanced-nfc | 20B | 0.701 | 1.14 | 0.820 | 0.509 | 0.056 | 0.012 | 0.070 | 0.006 |
+| llama3 | 10B | 0.718 | 1.17 | 0.820 | 0.548 | 0.038 | 0.006 | 0.042 | 0.008 |
+| llama3 | 20B | 0.704 | 1.15 | 0.820 | 0.560 | 0.055 | 0.006 | 0.060 | 0.005 |
+| gpt4o-code | 10B | 0.724 | 1.18 | 0.821 | 0.543 | 0.046 | 0.018 | 0.020 | 0.011 |
+| gpt4o-code | 20B | 0.709 | 1.15 | 0.827 | 0.545 | 0.064 | 0.024 | 0.028 | 0.011 |
 
 ## Related documents
 
 - **[Design-choice ablations](REPORT_ablations.md)** — capping, parity-aware vs plain BPE, SuperBPE-on-PA-base, pretokenizer family, hybrid-window vs base, transition point, parity tuning, plus the SuperBPE-vs-its-base comparison and the family-faceted plots.
 - **[Production-safety gates and vocabulary inspection](REPORT_production_safety.md)** — gate verdicts, round-trip fidelity, vocabulary-usage breakdown, long-token / junk-token / dead-vocab examples.
 - **[Appendix: full intrinsic tables](REPORT_appendix_intrinsic.md)** — per-tokenizer × per-language numbers across the broad / core / full FLORES sets, with per-language plots.
+- **Focus candidates** — the four-way comparison of the current candidate set (`preliminary_mul`, `preliminary_enh`, `preliminary_euh`, `preliminary_mul_200k`) with per-language plots is in `REPORT_focus_candidates.md`, which lives with the candidate tokenizers in the **apertus-tokenizer-development** repository (`~/apertus-tokenizer-development/REPORT_focus_candidates.md`).
 
 ---
 
