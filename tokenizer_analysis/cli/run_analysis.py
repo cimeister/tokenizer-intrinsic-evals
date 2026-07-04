@@ -433,6 +433,59 @@ def slim_results_for_json(results: Dict) -> Dict:
     return slimmed
 
 
+# --- Deprecation shims for flags/choices removed in 1.0.0 ---
+# The standalone morphological boundary metric was removed; MorphScore replaces it.
+# These stubs make old command lines fail with a clear pointer instead of an opaque
+# argparse error. See MIGRATION.md.
+_MIGRATION_HINT = "See MIGRATION.md for the full list of changes."
+
+_REMOVED_FLAG_MESSAGES = {
+    "--morphological-config": (
+        "--morphological-config was removed in tokenizer-analysis 1.0.0. The standalone "
+        "morphological boundary metric no longer exists; use MorphScore instead via "
+        "--morphscore (defaults) or --morphscore-config <file>. " + _MIGRATION_HINT
+    ),
+}
+
+_LATEX_TABLE_TYPES = ("basic", "information", "comprehensive")
+
+
+class _RemovedFlagAction(argparse.Action):
+    """Argparse action for flags removed in 1.0.0: fail loudly with a pointer."""
+
+    def __init__(self, option_strings, dest, **kwargs):
+        # Accept an optional trailing value so both "--flag" and "--flag x" reach us
+        # with our message rather than an "expected one argument" error.
+        kwargs["nargs"] = "?"
+        super().__init__(option_strings, dest, **kwargs)
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        parser.error(_REMOVED_FLAG_MESSAGES.get(
+            option_string,
+            f"{option_string} was removed in tokenizer-analysis 1.0.0. " + _MIGRATION_HINT,
+        ))
+
+
+class _LatexTableTypesAction(argparse.Action):
+    """Validate --latex-table-types, pointing users off the removed 'morphological' type."""
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        for value in values:
+            if value == "morphological":
+                parser.error(
+                    "--latex-table-types no longer supports 'morphological' (removed in "
+                    "tokenizer-analysis 1.0.0 with the standalone morphological metric). "
+                    "Use MorphScore via --morphscore. Valid types: "
+                    + ", ".join(_LATEX_TABLE_TYPES) + ". " + _MIGRATION_HINT
+                )
+            if value not in _LATEX_TABLE_TYPES:
+                parser.error(
+                    "argument --latex-table-types: invalid choice: %r (choose from %s)"
+                    % (value, ", ".join(repr(v) for v in _LATEX_TABLE_TYPES))
+                )
+        setattr(namespace, self.dest, values)
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the CLI parser for tokenizer analysis."""
     parser = argparse.ArgumentParser(
@@ -526,6 +579,12 @@ Examples:
         "--morphscore-config",
         type=str,
         help="JSON file with MorphScore configuration (requires raw tokenization)"
+    )
+    # Removed in 1.0.0: fail with a pointer instead of an opaque argparse error.
+    parser.add_argument(
+        "--morphological-config",
+        action=_RemovedFlagAction,
+        help=argparse.SUPPRESS,
     )
     parser.add_argument(
         "--morphscore",
@@ -637,7 +696,8 @@ Examples:
         "--latex-table-types",
         nargs="+",
         default=["basic", "comprehensive"],
-        choices=["basic", "information", "comprehensive"],
+        action=_LatexTableTypesAction,
+        metavar="{basic,information,comprehensive}",
         help="Types of (default) LaTeX tables to generate"
     )
     parser.add_argument(

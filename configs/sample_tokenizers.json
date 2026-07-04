@@ -1,0 +1,10 @@
+{
+  "bpe": {
+    "class": "huggingface",
+    "path": "tokenizers/bpe.json"
+  },
+  "unigramlm": {
+    "class": "huggingface",
+    "path": "tokenizers/unigramlm.json"
+  }
+}

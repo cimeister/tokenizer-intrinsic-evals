@@ -6,8 +6,8 @@ Supports both pairwise and multi-tokenizer comparisons with various metrics
 including information-theoretic measures and segmentation analysis.
 """
 
-__version__ = "0.1.0"
-__author__ = "Tokenizer Analysis Project"
+__version__ = "1.0.0"
+__author__ = "Clara Meister"
 
 from .metrics.base import BaseMetrics
 from .metrics.basic import BasicTokenizationMetrics

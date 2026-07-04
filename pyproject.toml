@@ -1,11 +1,11 @@
 [project]
-name = "tokenizer-analysis"
-version = "0.1.0"
+name = "tokenizer-intrinsic-evals"
+version = "1.0.0"
 description = "Comprehensive tokenizer analysis framework"
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [
-    { name = "Apertus tokenization team" },
+    { name = "Clara Meister" },
 ]
 dependencies = [
     "matplotlib>=3.3.0",
@@ -16,20 +16,15 @@ dependencies = [
     "tokenizers>=0.13.0",
     "tiktoken>=0.5.0",
     "transformers>=4.20.0",
-    "fastparquet>=2025.12.0",
-    "pyarrow>=23.0.1",
-    "tree-sitter-analyzer>=1.10.4",
     "tree-sitter-language-pack>=0.13.0",
 ]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
@@ -37,7 +32,7 @@ classifiers = [
 ]
 
 [project.urls]
-Repository = "https://github.com/sanderland/tokenizer-intrinsic-evals"
+Repository = "https://github.com/cimeister/tokenizer-intrinsic-evals"
 
 [project.scripts]
 tokenizer-analysis = "tokenizer_analysis.cli.run_analysis:main"
@@ -45,11 +40,10 @@ tokenizer-visualize = "tokenizer_analysis.cli.visualize_tokenization:main"
 tokenizer-sanity-check = "tokenizer_analysis.cli.sanity_check:main"
 
 [project.optional-dependencies]
-code-ast = [
-    "tree-sitter-language-pack>=0.10.0",
-]
+# Parquet code-corpus reading (pandas picks whichever engine is installed).
 parquet = [
     "pyarrow>=10.0.0",
+    "fastparquet>=2025.12.0",
 ]
 
 [dependency-groups]

@@ -4,31 +4,31 @@
 Usage:
     # Show built-in samples (code, math, multilingual) with all tokenizers
     tokenizer-visualize \\
-        --tokenizer-config configs/baseline_tokenizers.json
+        --tokenizer-config configs/sample_tokenizers.json
 
     # Only show a subset of tokenizers
     tokenizer-visualize \\
-        --tokenizer-config configs/baseline_tokenizers.json \\
-        --tokenizers "GPT-4o" "Qwen 3" "Classical"
+        --tokenizer-config configs/sample_tokenizers.json \\
+        --tokenizers "bpe" "unigramlm"
 
     # Visualize a single text file
     tokenizer-visualize \\
-        --tokenizer-config configs/baseline_tokenizers.json \\
+        --tokenizer-config configs/sample_tokenizers.json \\
         --input my_script.py
 
     # Visualize all files in a directory (1 sample per file by default)
     tokenizer-visualize \\
-        --tokenizer-config configs/baseline_tokenizers.json \\
+        --tokenizer-config configs/sample_tokenizers.json \\
         --input data/samples/
 
     # Read up to 3 samples per file (separated by --- lines)
     tokenizer-visualize \\
-        --tokenizer-config configs/baseline_tokenizers.json \\
+        --tokenizer-config configs/sample_tokenizers.json \\
         --input data/samples/ --samples-per-file 3
 
     # Plain text (no colour escapes) for file output
     tokenizer-visualize \\
-        --tokenizer-config configs/baseline_tokenizers.json --no-color > out.txt
+        --tokenizer-config configs/sample_tokenizers.json --no-color > out.txt
 """
 from __future__ import annotations
 

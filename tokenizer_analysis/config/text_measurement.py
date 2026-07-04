@@ -9,7 +9,7 @@ different counting functions for each measurement method.
 
 from enum import Enum
 from typing import Dict, Any, Optional
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 import re
 from tokenizers.pre_tokenizers import Whitespace, ByteLevel, Sequence
 
@@ -77,6 +77,19 @@ class TextMeasurementConfig:
     @classmethod
     def from_dict(cls, config_dict: Dict[str, Any]) -> 'TextMeasurementConfig':
         """Create TextMeasurementConfig from dictionary."""
+        # Reject unknown keys loudly rather than passing them to the constructor,
+        # where they would raise an opaque TypeError. This catches stale key names
+        # (e.g. the old "line_counting_method") with a clear, actionable message.
+        valid_keys = {f.name for f in fields(cls)}
+        unknown = [k for k in config_dict if k not in valid_keys]
+        if unknown:
+            raise ValueError(
+                "Unknown text-measurement config key(s): "
+                + ", ".join(sorted(repr(k) for k in unknown))
+                + ". Valid keys: " + ", ".join(sorted(valid_keys)) + "."
+            )
+        # Work on a copy so we never mutate the caller's dict.
+        config_dict = dict(config_dict)
         # Convert string values to enums
         if 'method' in config_dict:
             config_dict['method'] = NormalizationMethod(config_dict['method'])

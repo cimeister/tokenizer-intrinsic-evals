@@ -1,0 +1,40 @@
+TokEval (tokenizer-intrinsic-evals)
+Copyright (c) 2025 Clara Meister
+
+The source code in this repository is licensed under the MIT License (see LICENSE).
+Bundled data files carry their own licenses, described below.
+
+================================================================================
+Bundled evaluation data: parallel/
+================================================================================
+
+The files under parallel/ (parallel/<iso639-3>_<Script>.txt) are derived from
+the FLORES+ dataset and are used here for tokenizer evaluation only.
+
+  Dataset:  FLORES+ (Open Language Data Initiative)
+  Source:   https://huggingface.co/datasets/openlanguagedata/flores_plus
+  License:  CC-BY-SA 4.0 (https://creativecommons.org/licenses/by-sa/4.0/)
+
+Because this data is distributed under CC-BY-SA 4.0, redistribution (including
+the copies in this repository) is under the same license, with attribution.
+FLORES+ is intended for evaluation, not as training data.
+
+FLORES+ asks users to cite the original FLORES papers, in particular:
+  NLLB Team et al. "Scaling neural machine translation to 200 languages."
+  Nature 630 (2024).
+
+The file parallel/_mapping_report.txt records how FineWeb2 language codes were
+mapped to FLORES+ configuration names. Six files use a FLORES+ configuration
+whose code differs from the filename (for example cmn_Hani.txt holds cmn_Hans,
+fas_Arab holds pes_Arab, mni_Mtei holds mni_Beng); see that report for the full
+list.
+
+================================================================================
+Third-party tokenizers referenced in examples
+================================================================================
+
+Example configurations may reference tokenizers from the Hugging Face Hub or
+from tiktoken. Those tokenizers are downloaded at run time from their
+respective sources and are not redistributed in this repository. The bundled
+sample tokenizers (tokenizers/bpe.json, tokenizers/unigramlm.json) are small
+BPE and Unigram tokenizers included only to run the demo.

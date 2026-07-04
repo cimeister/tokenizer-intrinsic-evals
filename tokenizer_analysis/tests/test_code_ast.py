@@ -23,6 +23,25 @@ from tokenizer_analysis.core.input_types import TokenizedData
 _EPS = 1e-9
 
 
+def _has_parquet_engine() -> bool:
+    """True if a pandas parquet engine is importable (the optional 'parquet' extra)."""
+    for engine in ("pyarrow", "fastparquet"):
+        try:
+            __import__(engine)
+            return True
+        except ImportError:
+            continue
+    return False
+
+
+# Parquet reading is an optional feature (pyproject extra 'parquet'); skip its
+# tests when no engine is installed so a core install still has a green suite.
+requires_parquet = pytest.mark.skipif(
+    not _has_parquet_engine(),
+    reason="no parquet engine installed; run `uv sync --extra parquet`",
+)
+
+
 def _make_instance():
     """Return a bare ASTBoundaryMetrics without a live InputProvider.
 
@@ -406,6 +425,7 @@ class TestCodeDataLoader:
         loader.load_all()
         assert len(loader.get_code_snippets("python")) == 3
 
+    @requires_parquet
     def test_cap_limits_parquet_snippets(self, tmp_path):
         """Parquet loading also respects the cap."""
         import pandas as pd
@@ -459,6 +479,7 @@ class TestStarCoderMetadataStripping:
 # Parquet loading
 # ======================================================================
 
+@requires_parquet
 class TestParquetLoading:
     """Verify that CodeDataLoader can read parquet files."""
 

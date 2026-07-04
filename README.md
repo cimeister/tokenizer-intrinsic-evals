@@ -1,4 +1,4 @@
-# SwissAI TokEval
+# TokEval
 A toolkit for computing intrinsic quality metrics for tokenizers across natural language, code, and math.
 
 
@@ -8,7 +8,7 @@ Get up and running in 30 seconds:
 
 ```bash
 # Clone and install
-git clone https://github.com/swiss-ai/tokenizer-intrinsic-evals.git
+git clone https://github.com/cimeister/tokenizer-intrinsic-evals.git
 cd tokenizer-intrinsic-evals
 uv sync
 
@@ -16,7 +16,7 @@ uv sync
 uv run tokenizer-analysis --use-sample-data
 
 # View results
-open results/fertility.png  # Basic metric comparison chart
+open results/fertility_individual.svg  # Basic metric comparison chart
 ```
 
 This will analyze two sample tokenizers (BPE and Unigram) across 5 languages and generate comparison plots.
@@ -28,33 +28,54 @@ The `tokenizer-visualize` command renders token boundaries directly on source te
 ```bash
 # Show built-in samples (Python code, LaTeX math, multilingual text)
 uv run tokenizer-visualize \
-    --tokenizer-config configs/baseline_tokenizers.json
+    --tokenizer-config configs/sample_tokenizers.json
 
 # Show only specific tokenizers
 uv run tokenizer-visualize \
-    --tokenizer-config configs/baseline_tokenizers.json \
-    --tokenizers "GPT-4o" "Qwen 3"
+    --tokenizer-config configs/sample_tokenizers.json \
+    --tokenizers "bpe" "unigramlm"
 
 # Visualize all files in a directory
 # Files can contain multiple samples separated by a line with only "---".
 # Use --samples-per-file to control how many are read (default: 1).
 uv run tokenizer-visualize \
-    --tokenizer-config configs/baseline_tokenizers.json \
+    --tokenizer-config configs/sample_tokenizers.json \
     --input data/samples/ --samples-per-file 3
 
 ```
 
 Each sample is shown with line-numbered source text followed by a colour-coded token-boundary view for every tokenizer, plus whitespace and indentation statistics.
 
+## Sanity Checking a Tokenizer
+
+The `tokenizer-sanity-check` command runs a single-tokenizer health report: byte coverage, whitespace and digit handling, special-token behaviour, determinism, Unicode normalization, vocabulary integrity, and vocabulary reachability. It flags each check as pass, warn, or fail and sets a non-zero exit code when a check fails, so it can gate a tokenizer before a full analysis.
+
+```bash
+# Check a single tokenizer (CLASS:PATH form)
+uv run tokenizer-sanity-check huggingface:tokenizers/bpe.json
+
+# Check every tokenizer listed in a config
+uv run tokenizer-sanity-check --tokenizer-config configs/sample_tokenizers.json
+
+# Restrict a config run to one tokenizer by name
+uv run tokenizer-sanity-check --tokenizer-config configs/sample_tokenizers.json --only bpe
+
+# Add multilingual breadth (requires a language config)
+uv run tokenizer-sanity-check huggingface:tokenizers/bpe.json \
+    --use-sample-data --language-config configs/core_lang_config.json
+```
+
+Use `--exit-zero` to always return exit code 0 (report without gating) and `--quiet` to collapse passing checks in the text report.
+
 ## Setup
 
 ### Requirements
-- Python 3.8+
+- Python 3.10+
 - Git (for submodules)
 
 ### Full Installation
 ```bash
-git clone https://github.com/swiss-ai/tokenizer-intrinsic-evals.git
+git clone https://github.com/cimeister/tokenizer-intrinsic-evals.git
 cd tokenizer-intrinsic-evals
 uv sync
 
@@ -62,8 +83,8 @@ uv sync
 git submodule update --init --recursive
 uv pip install -e ./morphscore
 
-# Optional: AST boundary analysis for code
-uv sync --extra code-ast
+# Optional: reading code corpora from parquet files
+uv sync --extra parquet
 ```
 
 **MorphScore note**: Only `<ISO 639-3>_<script>` language codes are automatically mapped. Data files must be downloaded separately (see [MorphScore README](morphscore/README.md)) and placed in `morphscore_data/`.
@@ -139,7 +160,7 @@ Specify tokenizers via `--tokenizer-config`:
 }
 ```
 
-Available classes: `"huggingface"`, `"custom_bpe"` (requires `vocab.json` + `merges.txt`), and `"pretokenized"` (for pre-tokenized data).
+Available classes: `"huggingface"` (aliases `"hf"`, `"transformers"`), `"sentencepiece"`, `"custom_bpe"` (requires `vocab.json` + `merges.txt`), `"unimixlm"`, and `"pretokenized"` (for pre-tokenized data).
 
 ### Data Configuration
 
@@ -178,19 +199,21 @@ For simple setups, `"languages"` can map codes directly to file paths: `{"en": "
 
 Control how text "length" is measured for metric normalization via `--measurement-config`:
 
-| Method | Key | Options | Default for |
-|--------|-----|---------|-------------|
-| Bytes | `"bytes"` | `byte_counting_method`: `"utf8"`, `"hf_tokenizer"` | Compression metrics |
-| Characters | `"characters"` | — | — |
-| Lines | `"lines"` | `line_counting_method`: `"python_split"`, `"regex"` | Gini metrics |
-| Words | `"words"` | `word_counting_method`: `"whitespace"`, `"hf_whitespace"`, `"regex"` | Fertility |
+| Method | `method` value | Counting key and options | Default for |
+|--------|----------------|--------------------------|-------------|
+| Bytes | `"bytes"` | `byte_counting`: `"utf8"`, `"hf_bytelevel"` | Compression metrics |
+| Characters | `"characters"` | (none) | — |
+| Lines | `"lines"` | `line_counting`: `"single"`, `"newline_split"`, `"custom_regex"` | Gini metrics |
+| Words | `"words"` | `word_counting`: `"python_split"`, `"hf_whitespace"`, `"regex_whitespace"`, `"custom_regex"` | Fertility |
+
+`include_empty_splits` (bool, default `false`) affects word and line counting. `custom_regex` (string) is required when a counting method is set to `"custom_regex"`. Unknown keys are rejected with an error.
 
 Example:
 ```json
 {
   "method": "lines",
-  "line_counting_method": "python_split",
-  "include_empty_lines": false
+  "line_counting": "newline_split",
+  "include_empty_splits": false
 }
 ```
 
@@ -294,8 +317,7 @@ The slimmed file omits `pairwise_comparisons`, `summary`, `per_category` breakdo
 - **Bigram Entropy** (`bigram_entropy`): For each token type, looks at what tokens follow it in the corpus and measures whether the followers are evenly spread or dominated by one or two tokens. A score of 1.0 means every token's followers are perfectly balanced; a score near 0 means most tokens are almost always followed by the same thing. Can interpret this as "how easy the tokenizer makes a very simple case of language modeling." Token types that appear too rarely (fewer than 3 times by default, configurable) are ignored to avoid noisy estimates. Bigrams do not cross document boundaries. Based on the Shannon efficiency metric (η) from [Poelman et al. 2025](https://aclanthology.org/2025.emnlp-main.369/), EMNLP.
 
 ### Morphological Metrics
-- **Boundary Precision/Recall**: How well tokens align with morpheme boundaries
-- **MorphScore V2** (`morphscore_recall`): Advanced morphological evaluation ([Arnett et al. 2025](https://arxiv.org/abs/2507.06378))
+- **MorphScore V2** (`morphscore_recall`, `morphscore_precision`): Morphological evaluation ([Arnett et al. 2025](https://arxiv.org/abs/2507.06378)). Enable with `--morphscore` or `--morphscore-config` (requires raw tokenization and the MorphScore submodule).
 
 ### Mathematical Content Metrics
 
@@ -410,7 +432,7 @@ Counts how many multi-byte characters in the source text have their constituent 
 
 ### Code Tokenization Metrics
 
-Evaluates tokenizer handling of source code by parsing it with tree-sitter and measuring alignment between AST node boundaries and token boundaries. Install the optional support with `uv sync --extra code-ast`. Supports 19 languages (Python, JavaScript, Java, C, C++, Go, Rust, TypeScript, PHP, Ruby, C#, Scala, Swift, Kotlin, Lua, R, Perl, Haskell, Bash). Configure with `--code-ast-config`; disable with `--no-code-ast`.
+Evaluates tokenizer handling of source code by parsing it with tree-sitter and measuring alignment between AST node boundaries and token boundaries. Tree-sitter support is installed by default. Supports 19 languages (Python, JavaScript, Java, C, C++, Go, Rust, TypeScript, PHP, Ruby, C#, Scala, Swift, Kotlin, Lua, R, Perl, Haskell, Bash). Configure with `--code-ast-config`; disable with `--no-code-ast`.
 
 > **Data scope:** These metrics are **always** computed on dedicated source-code snippets (loaded via `--code-ast-config`, or small built-in synthetic samples as a fallback) — the general multilingual corpus passed to the analyzer is **never** used for this metric group, regardless of flags.
 
@@ -501,13 +523,19 @@ tokenizer_analysis/
 │   ├── math.py                   # Mathematical content metrics (digit boundaries, operators)
 │   ├── code_ast.py               # Code tokenization metrics (AST alignment, indentation)
 │   ├── utf8_integrity.py         # UTF-8 character boundary metrics
-│   ├── morphological.py          # Morphological boundary alignment
-│   ├── morphscore.py             # MorphScore neural evaluation
+│   ├── morphscore.py             # MorphScore morphological evaluation
 │   └── gini.py                   # Multilingual fairness metrics
+├── diagnostics/                   # Single-tokenizer sanity checks
+│   ├── sanity_check.py           # Health checks (byte coverage, determinism, ...)
+│   └── probe_corpus.py           # Probe corpus for reachability checks
+├── cli/                           # Console-script entry points
+│   ├── run_analysis.py           # tokenizer-analysis
+│   ├── visualize_tokenization.py # tokenizer-visualize
+│   └── sanity_check.py           # tokenizer-sanity-check
+├── per_example.py                 # Per-document metric outputs
 ├── loaders/                       # Data loading modules
 │   ├── constants.py              # Language code mappings (ISO639-1 to FLORES)
 │   ├── code_data.py              # Code snippet loader for AST metrics
-│   ├── morphological.py          # Morphological dataset loader
 │   └── multilingual_data.py      # Multilingual text dataset loader
 ├── utils/                         # Utility functions
 │   ├── text_utils.py             # Text processing utilities
@@ -667,6 +695,6 @@ Then reference `"class": "my_class"` in your tokenizer config.
   title = {TokEval: A Tokenizer Analysis Suite},
   author = {Meister, Clara},
   year = {2025},
-  url = {https://github.com/swiss-ai/tokenizer-intrinsic-evals}
+  url = {https://github.com/cimeister/tokenizer-intrinsic-evals}
 }
 ```
