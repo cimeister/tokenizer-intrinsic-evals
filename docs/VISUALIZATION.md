@@ -157,8 +157,8 @@ tables hold.
 
 ### Table types
 
-`--latex-table-types` takes any of `basic`, `information` and `comprehensive`,
-and defaults to `basic comprehensive`.
+`--latex-table-types` takes any of `basic`, `information`, `comprehensive` and
+`merge_usage`, and defaults to `basic comprehensive merge_usage`.
 
 - **`basic`**: eight columns, `compression_rate`, `type_token_ratio`,
   `vocabulary_utilization`, `fertility`, `renyi_2.5`, `tokenizer_fairness_gini`,
@@ -166,6 +166,11 @@ and defaults to `basic comprehensive`.
 - **`information`**: two columns, `renyi_1.0` and `avg_token_rank`.
 - **`comprehensive`**: every metric in the registry for which at least one
   tokenizer in the run has a value.
+- **`merge_usage`**: five columns, `merge_active`, `merge_rare`,
+  `merge_uncommon`, `merge_unseen` and `merge_scaffold`, the percentage of merge
+  tokens in each category of `merge_vocabulary_usage`. These columns have no
+  arrow and no bolded value, because none of the five percentages has a better
+  direction.
 
 A fourth type, `morphological`, was removed in 1.0.0. Passing it is rejected by
 name with a message saying what to use instead, rather than with a generic
@@ -174,20 +179,21 @@ invalid-choice error.
 ### Row ids
 
 The keys of `LaTeXTableGenerator.metric_configs` are the registry's own
-identifiers. There are 24, and 11 of them match neither the metric they read nor
+identifiers. There are 32, and 16 of them match neither the metric they read nor
 any field name in their own entry: `morphscore_recall`, `morphscore_precision`,
 `avg_token_rank`, `avg_tokens_per_line`, `three_digit_boundary_f1`,
 `operator_isolation`, `ast_full_alignment`, `ident_fragmentation`,
-`indent_depth_corr`, `utf8_boundary_crossing` and `utf8_char_split`, at
-`latex_tables.py` lines 102, 111, 122, 142, 171, 180, 190, 199, 208, 218 and
-231. To find what one reads, follow `key_path` and `value_key` in its entry:
+`indent_depth_corr`, `utf8_boundary_crossing`, `utf8_char_split`,
+`merge_active`, `merge_rare`, `merge_uncommon`, `merge_unseen` and
+`merge_scaffold`, at `latex_tables.py` lines 102, 111, 122, 142, 171, 180, 190,
+199, 208, 218, 231, 242, 252, 262, 272 and 282. To find what one reads, follow `key_path` and `value_key` in its entry:
 `operator_isolation` reads `overall_isolation_rate` from the
 `operator_isolation_rate` block, and `utf8_char_split` reads `char_split` then
 `global` from the `utf8_token_integrity` block.
 
 A row id is what a `--custom-latex-config` table lists under `metrics`.
-`--latex-table-types` takes `basic`, `information` or `comprehensive`, not row
-ids. `vocab_util_cross_lingual_cov` is a third thing again, a plot filename.
+`--latex-table-types` takes `basic`, `information`, `comprehensive` or
+`merge_usage`, not row ids. `vocab_util_cross_lingual_cov` is a third thing again, a plot filename.
 
 Those `key_path` and `value_key` entries name the raw results the analyser holds
 in memory, which is what `tokenizer-analysis` passes the generator. They are not

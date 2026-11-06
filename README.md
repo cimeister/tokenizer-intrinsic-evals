@@ -90,7 +90,7 @@ Results are written to `results/analysis_results.json`, with plots beside it.
 
 ## The metrics
 
-Eighteen metrics. One line each below; the definition, worked example and
+Nineteen metrics. One line each below; the definition, worked example and
 caveats for each are in [docs/METRICS.md](docs/METRICS.md), and the exact key
 path for each headline value is in
 [Metric names and results keys](docs/METRICS.md#metric-names-and-results-keys).
@@ -110,6 +110,7 @@ path for each headline value is in
 | `operator_isolation_rate` | whether operators are their own tokens | higher |
 | `reconstruction_fidelity` | whether decoding restores the input exactly | higher |
 | `utf8_token_integrity` | whether tokens are complete UTF-8 sequences | higher |
+| `merge_vocabulary_usage` | how often BPE merge tokens are emitted, and how often they are only built on the way to longer tokens | neither |
 | `ast_boundary_alignment` | whether token boundaries fall on syntax-tree leaves | higher |
 | `identifier_fragmentation` | how many tokens an identifier costs | lower |
 | `indentation_consistency` | whether whitespace tokens scale with indent depth | higher |
