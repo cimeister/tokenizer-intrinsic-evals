@@ -308,3 +308,63 @@ class TestRoundTripProseIsComputed:
         report = _render_custom(render, tmp_path,
                                 self._with_skipped_cer(0.0125, 0.5000), "cer2")
         assert "GPT-2 reconstructs 0.013 of its texts exactly" in report
+
+
+class TestMergeUsageSection:
+    """Every number and every conditional sentence comes from the results file."""
+
+    @staticmethod
+    def _results(total_final_tokens=271_337):
+        results = _results()
+        results["merge_vocabulary_usage"] = {
+            "metadata": {"corpus": "main input",
+                         "constants": {"min_final_tokens_warn": 1_000_000}},
+            "per_tokenizer": {
+                "gpt2": {
+                    "applicable": True,
+                    "encoding": "reencoded_ignore_merges_false",
+                    "texts_differing_after_reencode": 7,
+                    "texts_per_corpus": {"prose": 3250},
+                    "global": {
+                        "n_merge_tokens": 50_000, "pct_active": 12.34,
+                        "pct_rare": 5.67, "pct_uncommon": 8.9, "pct_unseen": 73.09,
+                        "pct_scaffold": 1.23,
+                        "total_final_tokens": total_final_tokens,
+                        "threshold_counts": {"rare_below": 5 * total_final_tokens / 1e6,
+                                             "uncommon_below": total_final_tokens / 1e6},
+                        "n_unreachable_without_ignore_merges": 3,
+                    },
+                },
+                "xlm-roberta": {"applicable": False, "global": None,
+                                "reason": "model type is Unigram, not BPE"},
+            },
+        }
+        return results
+
+    def test_rows_read_the_results_file(self, render, tmp_path):
+        section = _section(_render_custom(render, tmp_path, self._results()),
+                           "## Merge vocabulary usage")
+        assert "| GPT-2 | 50,000 | 12.34 | 5.67 | 8.90 | 73.09 | 1.23 |" in section
+        assert "| XLM-RoBERTa base | n/a | n/a | n/a | n/a | n/a | n/a |" in section
+
+    def test_sentences_follow_the_data(self, render, tmp_path):
+        section = _section(_render_custom(render, tmp_path, self._results()),
+                           "## Merge vocabulary usage")
+        # 5 x 271,337 / 1e6 = 1.36, so Active starts at 2 emissions.
+        assert "between 271,337 and 271,337 final tokens" in section
+        assert "Active means emitted at least 2 times" in section
+        assert ("GPT-2 ships with `ignore_merges` on and was encoded a second time "
+                "with it off; this changed the token ids of 7 of 3,250 texts for "
+                "GPT-2.") in section
+        assert "GPT-2 has 3 merge tokens that cannot be built" in section
+        assert ("The metric does not apply to XLM-RoBERTa base (model type is "
+                "Unigram, not BPE).") in section
+
+    def test_no_corpus_size_sentence_at_the_limit(self, render, tmp_path):
+        section = _section(
+            _render_custom(render, tmp_path, self._results(total_final_tokens=1_000_000)),
+            "## Merge vocabulary usage")
+        assert "final tokens per tokenizer" not in section
+
+    def test_a_results_file_without_the_block_omits_the_section(self, render, tmp_path):
+        assert "## Merge vocabulary usage" not in _render(render, tmp_path)

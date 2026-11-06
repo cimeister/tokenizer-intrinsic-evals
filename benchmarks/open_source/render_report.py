@@ -12,6 +12,7 @@ results, and `run.sh` regenerates both together.
 
 import argparse
 import json
+import math
 from pathlib import Path
 
 # Display name and Hub id per tokenizer key, in the order the tables use.
@@ -315,6 +316,96 @@ def section_domain(results, rows):
     return lines
 
 
+MERGE_USAGE_COLUMNS = ("pct_active", "pct_rare", "pct_uncommon", "pct_unseen", "pct_scaffold")
+
+
+def section_merge_usage(results, rows):
+    """Merge vocabulary usage, with the sentences that apply to this run.
+
+    Omitted, with a message, when the results file has no
+    merge_vocabulary_usage block: a run with --no-merge-vocabulary-usage, or
+    one from before 1.2.0.
+    """
+    block = get(results, "merge_vocabulary_usage")
+    if not block:
+        print("No merge_vocabulary_usage block in the results; omitting that section.")
+        return []
+    per_tok = block.get("per_tokenizer", {})
+    lines = ["", "## Merge vocabulary usage", "",
+             "| Tokenizer | Merge tokens | Active % | Rare % | Uncommon % | "
+             "Unseen % | Scaffold % |",
+             "|---|---:|---:|---:|---:|---:|---:|"]
+    for key, name, _repo, _algo in rows:
+        g = get(per_tok, key, "global") or {}
+        cells = [fmt(g.get("n_merge_tokens"))] + [fmt(g.get(c), 2) for c in MERGE_USAGE_COLUMNS]
+        lines.append(f"| {name} | " + " | ".join(cells) + " |")
+
+    corpus = get(block, "metadata", "corpus")
+    where = ("on the FLORES+ sentences of the tables above" if corpus == "main input"
+             else "on the FLORES+ sentences of the tables above and the code and "
+                  "math corpora")
+    lines += [
+        "",
+        "Each percentage is the share of the tokenizer's merge tokens in that "
+        f"category, {where}. A merge token is a vocabulary entry that a BPE "
+        "merge produces. A merge token is Active when it is emitted at least 5 "
+        "times per million final tokens, Rare when it is emitted from 1 up to 5 "
+        "times per million, Uncommon when it is emitted less often than that but "
+        "is still built as an intermediate step, and Unseen when it is never "
+        "built. The four percentages sum to 100. Scaffold is the share of merge "
+        "tokens that are Rare or Uncommon and that are merged further in more "
+        "than 90% of the cases where BPE builds them. "
+        "[METRICS.md](../../docs/METRICS.md#merge-vocabulary-usage-merge_vocabulary_usage) "
+        "gives the definitions.",
+    ]
+
+    applicable = [(key, name, per_tok[key]) for key, name, _r, _a in rows
+                  if get(per_tok, key, "applicable") is True]
+    sentences = []
+    limit = get(block, "metadata", "constants", "min_final_tokens_warn")
+    sizes = [(name, e["global"]["total_final_tokens"], e["global"]["threshold_counts"])
+             for _key, name, e in applicable]
+    if sizes and limit is not None and max(n for _name, n, _t in sizes) < limit:
+        smallest = min(sizes, key=lambda item: item[1])
+        active_from = math.ceil(smallest[2]["rare_below"])
+        sentences.append(
+            f"This corpus has between {min(n for _name, n, _t in sizes):,} and "
+            f"{max(n for _name, n, _t in sizes):,} final tokens per tokenizer, "
+            f"fewer than {limit:,}, so each rate threshold corresponds to a few "
+            f"emissions: for {smallest[0]}, Active means emitted at least "
+            f"{active_from} times and Uncommon means never emitted on its own."
+        )
+    reencoded = [(name, e) for _key, name, e in applicable
+                 if e.get("encoding") == "reencoded_ignore_merges_false"]
+    if reencoded:
+        changed = " and ".join(
+            f"{e['texts_differing_after_reencode']:,} of "
+            f"{sum(e['texts_per_corpus'].values()):,} texts for {name}"
+            for name, e in reencoded)
+        sentences.append(
+            " and ".join(name for name, _e in reencoded)
+            + (" ships" if len(reencoded) == 1 else " ship")
+            + " with `ignore_merges` on and "
+            + ("was" if len(reencoded) == 1 else "were")
+            + " encoded a second time with "
+            f"it off; this changed the token ids of {changed}."
+        )
+    for _key, name, e in applicable:
+        unreachable = e["global"]["n_unreachable_without_ignore_merges"]
+        if unreachable:
+            sentences.append(
+                f"{name} has {unreachable:,} merge tokens that cannot be built "
+                "with `ignore_merges` off. They are counted as Unseen."
+            )
+    for key, name, _r, _a in rows:
+        entry = per_tok.get(key)
+        if entry is not None and entry.get("applicable") is False:
+            sentences.append(f"The metric does not apply to {name} ({entry['reason']}).")
+    if sentences:
+        lines += [""] + [" ".join(sentences)]
+    return lines
+
+
 # Cell glyph per severity. Five, because sanity_check.Severity has five and a
 # legend short of one renders an unknown state as a blank cell that reads as a
 # pass. tokenizer_analysis/tests/test_render_report.py asserts the legend covers
@@ -519,6 +610,7 @@ def main(argv=None) -> int:
     lines += section_headline(results, rows)
     lines += section_per_language(results, rows)
     lines += section_domain(results, rows)
+    lines += section_merge_usage(results, rows)
     lines += section_health(sanity, rows)
     lines += section_caveats(rows)
     lines.append("")
