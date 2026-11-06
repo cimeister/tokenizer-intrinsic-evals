@@ -319,6 +319,11 @@ def section_domain(results, rows):
 MERGE_USAGE_COLUMNS = ("pct_active", "pct_rare", "pct_uncommon", "pct_unseen", "pct_scaffold")
 
 
+def _join(names):
+    """'A', 'A and B', 'A, B and C'."""
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+
+
 def section_merge_usage(results, rows):
     """Merge vocabulary usage, with the sentences that apply to this run.
 
@@ -362,19 +367,28 @@ def section_merge_usage(results, rows):
     applicable = [(key, name, per_tok[key]) for key, name, _r, _a in rows
                   if get(per_tok, key, "applicable") is True]
     sentences = []
-    limit = get(block, "metadata", "constants", "min_final_tokens_warn")
+    # Read directly: every results file with this block records its constants.
+    constants = block["metadata"]["constants"]
+    limit = constants["min_final_tokens_warn"]
     sizes = [(name, e["global"]["total_final_tokens"], e["global"]["threshold_counts"])
              for _key, name, e in applicable]
-    if sizes and limit is not None and max(n for _name, n, _t in sizes) < limit:
-        smallest = min(sizes, key=lambda item: item[1])
-        active_from = math.ceil(smallest[2]["rare_below"])
+    if sizes and max(n for _name, n, _t in sizes) < limit:
         sentences.append(
             f"This corpus has between {min(n for _name, n, _t in sizes):,} and "
             f"{max(n for _name, n, _t in sizes):,} final tokens per tokenizer, "
             f"fewer than {limit:,}, so each rate threshold corresponds to a few "
-            f"emissions: for {smallest[0]}, Active means emitted at least "
-            f"{active_from} times and Uncommon means never emitted on its own."
+            "emissions, and Uncommon means never emitted on its own."
         )
+        # One emission reaches the Active threshold when 5 per million of N is
+        # at most one emission, and then the Rare band is empty.
+        no_rare = [name for name, _n, t in sizes if math.ceil(t["rare_below"]) <= 1]
+        if no_rare:
+            below = int(1_000_000 / constants["rare_rate_per_million"])
+            sentences.append(
+                "For " + _join(no_rare) + f", with fewer than {below:,} final tokens, one "
+                "emission already reaches the Active threshold, so no merge "
+                "token can be Rare."
+            )
     reencoded = [(name, e) for _key, name, e in applicable
                  if e.get("encoding") == "reencoded_ignore_merges_false"]
     if reencoded:
@@ -393,9 +407,11 @@ def section_merge_usage(results, rows):
     for _key, name, e in applicable:
         unreachable = e["global"]["n_unreachable_without_ignore_merges"]
         if unreachable:
+            one = unreachable == 1
             sentences.append(
-                f"{name} has {unreachable:,} merge tokens that cannot be built "
-                "with `ignore_merges` off. They are counted as Unseen."
+                f"{name} has {unreachable:,} merge {'token' if one else 'tokens'} "
+                "that cannot be built with `ignore_merges` off. "
+                + ("It is" if one else "They are") + " counted as Unseen."
             )
     for key, name, _r, _a in rows:
         entry = per_tok.get(key)

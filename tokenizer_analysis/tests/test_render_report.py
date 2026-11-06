@@ -318,7 +318,8 @@ class TestMergeUsageSection:
         results = _results()
         results["merge_vocabulary_usage"] = {
             "metadata": {"corpus": "main input",
-                         "constants": {"min_final_tokens_warn": 1_000_000}},
+                         "constants": {"min_final_tokens_warn": 1_000_000,
+                                       "rare_rate_per_million": 5.0}},
             "per_tokenizer": {
                 "gpt2": {
                     "applicable": True,
@@ -350,15 +351,30 @@ class TestMergeUsageSection:
     def test_sentences_follow_the_data(self, render, tmp_path):
         section = _section(_render_custom(render, tmp_path, self._results()),
                            "## Merge vocabulary usage")
-        # 5 x 271,337 / 1e6 = 1.36, so Active starts at 2 emissions.
+        # 5 x 271,337 / 1e6 = 1.36: Active starts at 2 emissions, so a token
+        # emitted once is Rare and the Rare band is not empty.
         assert "between 271,337 and 271,337 final tokens" in section
-        assert "Active means emitted at least 2 times" in section
+        assert "no merge token can be Rare" not in section
         assert ("GPT-2 ships with `ignore_merges` on and was encoded a second time "
                 "with it off; this changed the token ids of 7 of 3,250 texts for "
                 "GPT-2.") in section
-        assert "GPT-2 has 3 merge tokens that cannot be built" in section
+        assert ("GPT-2 has 3 merge tokens that cannot be built with "
+                "`ignore_merges` off. They are counted as Unseen.") in section
         assert ("The metric does not apply to XLM-RoBERTa base (model type is "
                 "Unigram, not BPE).") in section
+
+    def test_below_200000_tokens_no_token_can_be_rare(self, render, tmp_path):
+        # 5 x 150,000 / 1e6 = 0.75: one emission is already Active.
+        results = self._results(total_final_tokens=150_000)
+        results["merge_vocabulary_usage"]["per_tokenizer"]["gpt2"]["global"][
+            "n_unreachable_without_ignore_merges"] = 1
+        section = _section(_render_custom(render, tmp_path, results),
+                           "## Merge vocabulary usage")
+        assert ("For GPT-2, with fewer than 200,000 final tokens, one emission "
+                "already reaches the Active threshold, so no merge token can be "
+                "Rare.") in section
+        assert ("GPT-2 has 1 merge token that cannot be built with "
+                "`ignore_merges` off. It is counted as Unseen.") in section
 
     def test_no_corpus_size_sentence_at_the_limit(self, render, tmp_path):
         section = _section(
