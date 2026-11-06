@@ -1098,14 +1098,14 @@ class CustomBPETokenizer(TokenizerWrapper):
     def _rust(self):
         """The ``tokenizers.Tokenizer`` this wrapper's methods are written for.
 
-        ``_load_custom_bpe_from_directory`` returns a raw ``tokenizers.Tokenizer``
-        for a ``.json`` path and for a directory holding vocab.json plus
-        merges.txt, but the strategy before it returns a transformers fast
-        tokenizer for a Hub id or a directory carrying tokenizer_config.json, and
-        that keeps the Rust object one level down at ``backend_tokenizer``. Every
-        method here reads the Rust API, so on that shape ``encode``,
-        ``encode_with_offsets``, ``encode_batch_with_offsets`` and
-        ``convert_ids_to_tokens`` all raised AttributeError, and
+        ``from_config`` builds the wrapper through
+        ``_load_custom_bpe_from_directory``, which reads only a directory holding
+        vocab.json plus merges.txt and returns a raw ``tokenizers.Tokenizer``.
+        A caller constructing the class directly can instead pass a transformers
+        fast tokenizer, which keeps the Rust object one level down at
+        ``backend_tokenizer``. Every method here reads the Rust API, so on that
+        shape ``encode``, ``encode_with_offsets``, ``encode_batch_with_offsets``
+        and ``convert_ids_to_tokens`` all raised AttributeError, and
         ``can_pretokenize`` quietly answered False for a tokenizer that has a
         pre-tokenizer. Resolving the same way :class:`HuggingFaceTokenizer` does
         makes both shapes work and leaves the raw-Tokenizer path untouched.
