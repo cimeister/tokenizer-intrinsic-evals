@@ -171,6 +171,15 @@ conflicting flags.
 
 ## Releases
 
+- **1.2.0** New metric, `merge_vocabulary_usage`. For each BPE merge token it
+  counts how often the token is emitted and how often it is built as an
+  intermediate step, and reports the percentage of merge tokens that are
+  Active, Rare, Uncommon, Unseen and Scaffold. The definitions are in
+  [docs/METRICS.md](docs/METRICS.md#merge-vocabulary-usage-merge_vocabulary_usage).
+  On by default; `--no-merge-vocabulary-usage` turns it off, and
+  `--merge-usage-include-code-math` adds the code and math corpora. The LaTeX
+  output has a new `merge_usage` table type.
+
 - **1.1.0** A metric constructed with the same corpus arguments as one
   built before it is accepted rather than refused. Metric constructors register
   the corpus they build, and the check that stops a later metric silently

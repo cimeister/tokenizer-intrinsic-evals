@@ -23,6 +23,7 @@ from .metrics.math import (
 )
 from .metrics.code_ast import ASTBoundaryMetrics
 from .metrics.utf8_integrity import UTF8IntegrityMetrics
+from .metrics.merge_usage import MergeVocabularyUsageMetrics
 from .metrics.redundancy import merge_redundant_metrics
 from .visualization import TokenizerVisualizer
 from .visualization.latex_tables import LaTeXTableGenerator
@@ -206,6 +207,10 @@ class UnifiedTokenizerAnalyzer:
         # Initialize UTF-8 integrity metrics (always available: no external data)
         self.utf8_integrity_metrics = UTF8IntegrityMetrics(input_provider)
 
+        # Merge vocabulary usage (always available: reads the merge list of
+        # each BPE tokenizer and reports the others as not applicable)
+        self.merge_usage_metrics = MergeVocabularyUsageMetrics(input_provider)
+
         # Initialize AST boundary metrics if config provided
         self.ast_boundary_metrics = None
         if code_ast_config is not None:
@@ -252,6 +257,8 @@ class UnifiedTokenizerAnalyzer:
                     include_code_ast: bool = True,
                     include_utf8_integrity: bool = True,
                     include_reconstruction: bool = True,
+                    include_merge_vocabulary_usage: bool = True,
+                    merge_usage_include_code_math: bool = False,
                     verbose: bool = True,
                     save_tokenized_data: bool = False,
                     tokenized_data_path: str = None,
@@ -271,6 +278,11 @@ class UnifiedTokenizerAnalyzer:
             include_utf8_integrity: Whether to include the UTF-8 token integrity
                 and character split metrics
             include_reconstruction: Whether to include reconstruction fidelity analysis
+            include_merge_vocabulary_usage: Whether to include the merge
+                vocabulary usage metric (Active / Rare / Uncommon / Unseen,
+                Scaffold)
+            merge_usage_include_code_math: Whether the merge vocabulary usage
+                counts also pool the registered code and math corpora
             verbose: Whether to print detailed results
             save_tokenized_data: Whether to save tokenized data to file
             tokenized_data_path: Path to save tokenized data (defaults to plot_save_dir/tokenized_data.pkl)
@@ -386,6 +398,15 @@ class UnifiedTokenizerAnalyzer:
 
             if verbose:
                 self.utf8_integrity_metrics.print_results(utf8_results)
+
+        if include_merge_vocabulary_usage:
+            logger.info("Computing merge vocabulary usage...")
+            merge_usage_results = self.merge_usage_metrics.compute(
+                tokenized_data, include_code_math=merge_usage_include_code_math)
+            results.update(merge_usage_results)
+
+            if verbose:
+                self.merge_usage_metrics.print_results(merge_usage_results)
 
         # Fold metrics that restate one another into the metric that owns the
         # measurement, so the results file does not present one number twice as
@@ -1055,7 +1076,7 @@ class UnifiedTokenizerAnalyzer:
         Args:
             results: Analysis results dictionary
             output_dir: Output directory for table files. If None, uses plot_save_dir
-            table_types: List of table types to generate. Options: 'basic', 'information', 'comprehensive'
+            table_types: List of table types to generate. Options: 'basic', 'information', 'comprehensive', 'merge_usage'
             metrics: Dict mapping table types to specific metrics to include
             **formatting_options: Additional formatting options for LaTeX tables
             
@@ -1066,7 +1087,7 @@ class UnifiedTokenizerAnalyzer:
             output_dir = os.path.join(self.plot_save_dir, "latex_tables")
         
         if table_types is None:
-            table_types = ['basic', 'comprehensive']
+            table_types = ['basic', 'comprehensive', 'merge_usage']
         
         if metrics is None:
             metrics = {}
@@ -1104,6 +1125,13 @@ class UnifiedTokenizerAnalyzer:
                     )
                     caption = "Comprehensive Tokenizer Analysis"
                     label = "tab:comprehensive_metrics"
+
+                elif table_type == 'merge_usage':
+                    table_content = latex_generator.generate_merge_usage_table(
+                        metrics.get('merge_usage', None)
+                    )
+                    caption = "Merge Vocabulary Usage (\\% of merge tokens)"
+                    label = "tab:merge_usage"
                     
                 else:
                     logger.warning(f"Unknown table type: {table_type}")

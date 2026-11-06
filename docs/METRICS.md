@@ -64,6 +64,7 @@ uses its own row ids, and eight of them appear in no results file; see
 | Token UTF-8 completeness rate | `utf8_token_integrity` | `.per_tokenizer.<tok>.global.completeness_rate` | higher |
 | Character boundary crossing rate | (under `utf8_token_integrity`) | `.per_tokenizer.<tok>.global.boundary_crossing_rate` | lower |
 | Character boundary split rate | (under `utf8_token_integrity`) | `.per_tokenizer.<tok>.char_split.global.split_rate` | lower |
+| Merge vocabulary usage | `merge_vocabulary_usage` | `.per_tokenizer.<tok>.global.pct_scaffold` and the other `pct_*` fields | neither |
 | AST leaf-node boundary alignment | `ast_boundary_alignment` | `.per_tokenizer.<tok>.global.full_alignment_rate` | higher |
 | Identifier fragmentation | `identifier_fragmentation` | `.per_tokenizer.<tok>.global.fragmentation_rate` | lower |
 | Indentation depth correlation | `indentation_consistency` | `.per_tokenizer.<tok>.global.depth_proportionality_correlation` | higher |
@@ -688,6 +689,91 @@ The completeness rate counts tokens and the split count counts source
 characters. A tokenizer can have few incomplete tokens overall and still split
 most multi-byte characters, because one split character produces several
 incomplete tokens.
+
+## Merge vocabulary usage (`merge_vocabulary_usage`)
+
+How the merge vocabulary of a BPE tokenizer is used on the corpus. A merge token
+is a vocabulary entry that at least one merge produces. Declared special and
+added tokens are not merge tokens. Runs on any text data with no extra
+configuration. Disable with `--no-merge-vocabulary-usage`.
+
+For each merge token, the metric counts two quantities on the corpus:
+
+- `final`: the number of times the token is emitted as a final token.
+- `formed`: `final` plus the number of times the token is built as an
+  intermediate symbol inside a longer emitted token.
+
+From these, with N the number of final tokens in the corpus (special and added
+tokens excluded):
+
+- standalone rate = `final / N`
+- survival = `final / formed`
+
+Each merge token is in exactly one of four categories, which together include
+all merge tokens:
+
+| Category | Condition |
+|---|---|
+| Active | `formed > 0` and standalone rate at least 5 per million |
+| Rare | `formed > 0` and standalone rate from 1 up to 5 per million |
+| Uncommon | `formed > 0` and standalone rate below 1 per million |
+| Unseen | `formed = 0` |
+
+A Scaffold token is a Rare or Uncommon token with survival below 0.1: it is
+rarely emitted on the corpus, and in more than 90% of the cases where BPE
+builds it, it is merged further. Scaffold tokens are not removable, because the
+longer tokens that are emitted are built from them.
+
+`merge_vocabulary_usage.per_tokenizer.<tok>.global` contains the percentage of
+merge tokens in each category (`pct_active`, `pct_rare`, `pct_uncommon`,
+`pct_unseen`, `pct_scaffold`), the same numbers as counts under `counts`, and
+`pct_scaffold_byte_fragment`, the percentage of merge tokens that are Scaffold
+tokens and whose bytes are not a complete UTF-8 sequence.
+
+**Example.** A tokenizer has the merges `a b`, `ab c` and `x y`, `xy z`. On a
+corpus where `abc` occurs 3 times and `xyz` once, `ab` is formed 3 times and
+never emitted, so its survival is 0. `abc` is emitted 3 times and its survival
+is 1.
+
+**`ignore_merges`.** The counts are those of encoding with `ignore_merges`
+off. With the flag on, a pre-token (a piece of text after pre-tokenization)
+that is already a vocabulary entry is emitted directly, without the merges that build it, so the intermediate counts
+would describe merges the encoder did not run. A tokenizer that ships with the
+flag on is encoded a second time with it off, and its entry contains
+`"encoding": "reencoded_ignore_merges_false"` and the number of texts whose ids
+changed. Some merge tokens cannot be built at all with the flag off, because a
+merge earlier in the merge list always combines one of their characters with a
+different neighbour first. They count as
+Unseen, and `n_unreachable_without_ignore_merges` gives their number. Llama 3
+has 588 such tokens.
+
+**Intermediate tokens.** The metric finds the intermediate tokens by running
+BPE on the string of each distinct emitted token, in the order the `tokenizers`
+library applies merges: the merge earliest in the merge list first, and the
+leftmost occurrence first when the same pair occurs twice. Several merges can
+produce the same token. For example, the Apertus merge list contains three
+merges that produce `Ġthe`. In that case the merge that BPE applies
+depends on the ranks of the pairs in the string, so the intermediate tokens
+cannot be read from a single fixed tree.
+
+**Corpus size.** The thresholds are rates, so on a corpus of fewer than one
+million final tokens a token emitted once is already above 1 per million, and
+Uncommon means never emitted on its own. The metric still runs and adds a
+warning to the entry. `threshold_counts` gives both thresholds as numbers of
+emissions for the corpus at hand. A corpus with no final tokens raises an error, because no
+rate is defined.
+
+**Scope.** The counts are pooled over every language of the main input, so the
+language mix of the input changes the percentages. `--merge-usage-include-code-math` adds
+the code and math corpora. Without `--code-ast-config` or `--math-data` these
+are the bundled samples, and `metadata.code_math_sources` lists them. The
+metric is not computed per language group.
+
+**Not applicable.** The metric reads the merge list of the encoder. A tokenizer
+that is not BPE, a Hugging Face tokenizer with no `tokenizers` backend, a BPE
+with dropout or with a subword prefix or end-of-word suffix, and pre-tokenized
+input get `"applicable": false` with the reason, and a warning in the log lists
+them.
 
 ## Code tokenization metrics
 

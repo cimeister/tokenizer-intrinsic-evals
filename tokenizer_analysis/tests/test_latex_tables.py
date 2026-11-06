@@ -261,6 +261,12 @@ class TestMergedMetricsStillRender:
                                   'newline_fidelity': 0.99,
                                   'tab_fidelity': 1.0}},
             },
+            'merge_vocabulary_usage': {
+                'per_tokenizer': {'A': {'global': {
+                    'pct_active': 15.1, 'pct_rare': 27.5, 'pct_uncommon': 18.6,
+                    'pct_unseen': 38.8, 'pct_scaffold': 4.6,
+                }}},
+            },
         }
         # Every metric the merge relocates is in the fixture, so the merge runs
         # in full rather than skipping a pair for a missing block.

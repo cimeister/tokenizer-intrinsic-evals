@@ -104,6 +104,23 @@ DEFAULT_MAX_TEXTS_PER_LANGUAGE = 1000
 DEFAULT_MAX_SAMPLES = 2000
 
 
+# --- Merge vocabulary usage (metrics/merge_usage.py) ---
+
+# Thresholds on a merge token's standalone rate (final emissions per million
+# final tokens) and survival (final emissions / times formed). Values are those
+# of the research script the metric was ported from, fixed 2026-05-28.
+MERGE_USAGE_UNCOMMON_RATE_PER_M = 1.0
+MERGE_USAGE_RARE_RATE_PER_M = 5.0
+MERGE_USAGE_SCAFFOLD_SURVIVAL_MAX = 0.1
+# Below this many final tokens the rate thresholds fall under one occurrence
+# (1 per million of fewer than a million tokens), so Uncommon means "never
+# emitted on its own". The metric still runs, and warns.
+MERGE_USAGE_MIN_FINAL_TOKENS_WARN = 1_000_000
+# Example tokens written to the full results file.
+MERGE_USAGE_EXAMPLE_COUNT = 10
+MERGE_USAGE_BYTE_FRAGMENT_EXAMPLE_COUNT = 5
+
+
 # --- File Formats ---
 
 JSON_EXTENSIONS = ['.json']

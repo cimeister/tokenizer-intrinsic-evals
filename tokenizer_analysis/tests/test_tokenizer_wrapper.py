@@ -1405,10 +1405,11 @@ class TestScriptTokOffsetGuardsRefuseRatherThanGuess:
 class TestCustomBPEHandlesBothShapesItsLoaderReturns:
     """`custom_bpe` is written for the Rust API and can be handed the other one.
 
-    `_load_custom_bpe_from_directory` returns a raw `tokenizers.Tokenizer` for a
-    `.json` path and for a directory of vocab.json plus merges.txt, but the
-    strategy that runs before those returns a transformers fast tokenizer for a
-    Hub id or a directory carrying tokenizer_config.json. Every method of
+    `from_config` loads through `_load_custom_bpe_from_directory`, which reads
+    only a directory of vocab.json plus merges.txt and returns a raw
+    `tokenizers.Tokenizer`. A caller constructing the class directly can pass a
+    transformers fast tokenizer instead (the class name predates this
+    correction: the loader itself returns only the raw shape). Every method of
     `CustomBPETokenizer` read the Rust API directly, so on that shape four of
     them raised AttributeError and `can_pretokenize()` answered False for a
     tokenizer that has a pre-tokenizer, which is the one silent failure of the
