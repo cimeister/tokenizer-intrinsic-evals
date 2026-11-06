@@ -884,6 +884,15 @@ def _select_tokenizer_entry(
         if 'global' in tok_data:
             out['global'] = tok_data['global']
 
+    # Example tokens and per-language final-token counts: full results only.
+    # The percentages, counts and thresholds in 'global' and the fields that
+    # say how the counts were produced are published.
+    elif metric_name == 'merge_vocabulary_usage':
+        for key, value in tok_data.items():
+            if key not in ('examples_scaffold', 'examples_scaffold_byte_fragment',
+                           'final_tokens_per_language'):
+                out[key] = value
+
     # --- Fallback: keep every key, stripping stats where the shape matches ---
     else:
         for key, value in tok_data.items():
@@ -1028,7 +1037,7 @@ _REMOVED_FLAG_MESSAGES = {
     ),
 }
 
-_LATEX_TABLE_TYPES = ("basic", "information", "comprehensive")
+_LATEX_TABLE_TYPES = ("basic", "information", "comprehensive", "merge_usage")
 
 
 class _RemovedFlagAction(argparse.Action):
@@ -1297,9 +1306,9 @@ Examples:
     parser.add_argument(
         "--latex-table-types",
         nargs="+",
-        default=["basic", "comprehensive"],
+        default=["basic", "comprehensive", "merge_usage"],
         action=_LatexTableTypesAction,
-        metavar="{basic,information,comprehensive}",
+        metavar="{basic,information,comprehensive,merge_usage}",
         help="Types of (default) LaTeX tables to generate"
     )
     parser.add_argument(
@@ -1404,6 +1413,20 @@ Examples:
         "--no-reconstruction",
         action="store_true",
         help="Skip reconstruction fidelity analysis (decode round-trip)"
+    )
+    parser.add_argument(
+        "--no-merge-vocabulary-usage",
+        action="store_true",
+        help="Skip the merge vocabulary usage metric (Active / Rare / Uncommon "
+             "/ Unseen merge tokens, and Scaffold)"
+    )
+    parser.add_argument(
+        "--merge-usage-include-code-math",
+        action="store_true",
+        help="Pool the code and math corpora into the merge vocabulary usage "
+             "counts, as well as the main input. Without --code-ast-config or "
+             "--math-data these are the bundled samples, and the results "
+             "metadata names them."
     )
     parser.add_argument(
         "--cer-time-budget",
@@ -1688,6 +1711,7 @@ def _build_run_metadata(args: argparse.Namespace, tokenizer_configs: Dict,
                 ("digit_boundary", args.no_digit_boundary),
                 ("utf8_integrity", args.no_utf8_integrity),
                 ("reconstruction", args.no_reconstruction),
+                ("merge_vocabulary_usage", args.no_merge_vocabulary_usage),
             ) if off
         ),
     }
@@ -2026,6 +2050,8 @@ def run_from_args(args: argparse.Namespace):
             include_code_ast=not args.no_code_ast,
             include_utf8_integrity=not args.no_utf8_integrity,
             include_reconstruction=not args.no_reconstruction,
+            include_merge_vocabulary_usage=not args.no_merge_vocabulary_usage,
+            merge_usage_include_code_math=args.merge_usage_include_code_math,
             verbose=args.verbose,
             save_tokenized_data=args.save_tokenized_data,
             tokenized_data_path=args.tokenized_data_output_path,
@@ -2041,6 +2067,8 @@ def run_from_args(args: argparse.Namespace):
             include_code_ast=not args.no_code_ast,
             include_utf8_integrity=not args.no_utf8_integrity,
             include_reconstruction=not args.no_reconstruction,
+            include_merge_vocabulary_usage=not args.no_merge_vocabulary_usage,
+            merge_usage_include_code_math=args.merge_usage_include_code_math,
             verbose=args.verbose,
             save_tokenized_data=args.save_tokenized_data,
             tokenized_data_path=args.tokenized_data_output_path,

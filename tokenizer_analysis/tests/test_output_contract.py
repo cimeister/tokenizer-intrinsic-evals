@@ -237,6 +237,9 @@ def test_slim_file_is_a_strict_projection_of_the_full_file(full_and_slim_results
 #       count. OUTPUT.md names them.
 #   the gini global block's min_cost and max_cost  are the smallest and largest
 #       value of the published per_language costs.
+#   the merge_vocabulary_usage examples and final_tokens_per_language  are
+#       detail: ten and five example tokens, and each language's share of the
+#       published total_final_tokens.
 _DELIBERATELY_UNPUBLISHED = {
     "compression_rate": {"per_tokenizer": {"num_texts_analyzed"}},
     "fertility": {"global": {"sum", "std_err", "min", "max"}},
@@ -259,6 +262,13 @@ _DELIBERATELY_UNPUBLISHED = {
     },
     "utf8_token_integrity": {"metric": {"summary"}},
     "ast_boundary_alignment": {"per_tokenizer": {"per_category"}},
+    "merge_vocabulary_usage": {
+        "per_tokenizer": {
+            "examples_scaffold",
+            "examples_scaffold_byte_fragment",
+            "final_tokens_per_language",
+        },
+    },
 }
 
 

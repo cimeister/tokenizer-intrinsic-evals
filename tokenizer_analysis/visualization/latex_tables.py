@@ -237,6 +237,58 @@ class LaTeXTableGenerator:
                 'format': '{:.4f}',
                 'lower_is_better': True
             },
+            # Merge vocabulary usage. Percentages of merge tokens with no
+            # direction in which a value is better, so no column is bolded.
+            'merge_active': {
+                'title': 'Active \\%',
+                'key_path': ['merge_vocabulary_usage', 'per_tokenizer'],
+                'value_key': 'global',
+                'stat_key': 'pct_active',
+                'err_key': None,
+                'format': '{:.2f}',
+                'lower_is_better': False,
+                'no_direction': True,
+            },
+            'merge_rare': {
+                'title': 'Rare \\%',
+                'key_path': ['merge_vocabulary_usage', 'per_tokenizer'],
+                'value_key': 'global',
+                'stat_key': 'pct_rare',
+                'err_key': None,
+                'format': '{:.2f}',
+                'lower_is_better': False,
+                'no_direction': True,
+            },
+            'merge_uncommon': {
+                'title': 'Uncommon \\%',
+                'key_path': ['merge_vocabulary_usage', 'per_tokenizer'],
+                'value_key': 'global',
+                'stat_key': 'pct_uncommon',
+                'err_key': None,
+                'format': '{:.2f}',
+                'lower_is_better': False,
+                'no_direction': True,
+            },
+            'merge_unseen': {
+                'title': 'Unseen \\%',
+                'key_path': ['merge_vocabulary_usage', 'per_tokenizer'],
+                'value_key': 'global',
+                'stat_key': 'pct_unseen',
+                'err_key': None,
+                'format': '{:.2f}',
+                'lower_is_better': False,
+                'no_direction': True,
+            },
+            'merge_scaffold': {
+                'title': 'Scaffold \\%',
+                'key_path': ['merge_vocabulary_usage', 'per_tokenizer'],
+                'value_key': 'global',
+                'stat_key': 'pct_scaffold',
+                'err_key': None,
+                'format': '{:.2f}',
+                'lower_is_better': False,
+                'no_direction': True,
+            },
             # Reconstruction fidelity
             'exact_match_rate': {
                 'title': 'Exact Match',
@@ -585,6 +637,9 @@ class LaTeXTableGenerator:
             cfg = self.metric_configs[m]
             arrow = "$\\downarrow$" if cfg.get('lower_is_better') else "$\\uparrow$"
             wrapped_title = self._wrap_column_title(cfg['title'])
+            if cfg.get('no_direction'):
+                header_titles.append(wrapped_title if wrapped_title.startswith("\\makecell{") else f"\\makecell{{{wrapped_title}}}")
+                continue
             if wrapped_title.startswith("\\makecell{") and wrapped_title.endswith("}"):
                 # Append the arrow inside the last makecell line.
                 inner = wrapped_title[len("\\makecell{"):-1]
@@ -612,6 +667,9 @@ class LaTeXTableGenerator:
         # Find best values for each metric
         best_tokenizers = {}
         for metric in valid_metrics:
+            if self.metric_configs[metric].get('no_direction'):
+                best_tokenizers[metric] = ""
+                continue
             best_tokenizers[metric] = self._find_best_values(
                 all_values[metric], 
                 self.metric_configs[metric]['lower_is_better']
@@ -659,6 +717,13 @@ class LaTeXTableGenerator:
         
         return self.generate_basic_metrics_table(metrics)
     
+    def generate_merge_usage_table(self, metrics: List[str] = None) -> str:
+        """LaTeX table of the merge vocabulary usage percentages."""
+        if metrics is None:
+            metrics = ['merge_active', 'merge_rare', 'merge_uncommon',
+                       'merge_unseen', 'merge_scaffold']
+        return self.generate_basic_metrics_table(metrics)
+
     def generate_comprehensive_table(self, metrics: List[str] = None) -> str:
         """
         Generate comprehensive LaTeX table with all available metrics.

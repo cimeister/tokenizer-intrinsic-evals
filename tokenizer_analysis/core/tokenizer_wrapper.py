@@ -323,6 +323,17 @@ class TokenizerWrapper(ABC):
         """IDs of tokens declared special in the tokenizer's metadata. Default: none."""
         return set()
 
+    def get_bpe_merge_model(self):
+        """The BPE merge list this wrapper encodes with, or why there is none.
+
+        Returns a ``BPEMergeModel`` or a ``NotApplicable`` from
+        ``core/bpe_merges.py``. Only wrappers whose ``encode`` is a single call
+        into a ``tokenizers`` BPE model return a merge list; every other class
+        returns ``NotApplicable`` naming itself.
+        """
+        from .bpe_merges import NotApplicable
+        return NotApplicable(f"{type(self).__name__} exposes no BPE merge list")
+
     def get_metadata(self) -> Dict[str, Any]:
         """Get additional tokenizer metadata."""
         return {
@@ -518,6 +529,28 @@ class HuggingFaceTokenizer(TokenizerWrapper):
                     result.append(f"<UNK_{tid}>")
             return result
         return super().convert_ids_to_tokens(token_ids)
+
+    def get_bpe_merge_model(self):
+        """The merge list of the tokenizers backend, for this exact class only.
+
+        Subclasses (UniMixLMTokenizer, registered classes) can encode by other
+        routes, such as per-language tokenizers, so they do not inherit this.
+        ``encode`` passes ``add_special_tokens=False``.
+        """
+        from .bpe_merges import NotApplicable, merge_model_from_backend
+        if type(self) is not HuggingFaceTokenizer:
+            return NotApplicable(
+                f"{type(self).__name__} may encode by a route other than its "
+                "tokenizers backend"
+            )
+        from tokenizers import Tokenizer
+        backend = (self._tokenizer if isinstance(self._tokenizer, Tokenizer)
+                   else getattr(self._tokenizer, 'backend_tokenizer', None))
+        if backend is None:
+            return NotApplicable(
+                f"{type(self._tokenizer).__name__} has no tokenizers backend"
+            )
+        return merge_model_from_backend(backend, self._name, encode_add_special_tokens=False)
 
     def _added_tokens_decoder(self):
         """Return {id: AddedToken-like} for declared added/special tokens, for either a
@@ -1126,6 +1159,19 @@ class CustomBPETokenizer(TokenizerWrapper):
 
     def encode(self, text: str) -> List[int]:
         return self._rust().encode(text).ids
+
+    def get_bpe_merge_model(self):
+        """The merge list of the tokenizers backend, for this exact class only.
+
+        ``encode`` calls the backend with its default ``add_special_tokens=True``.
+        """
+        from .bpe_merges import NotApplicable, merge_model_from_backend
+        if type(self) is not CustomBPETokenizer:
+            return NotApplicable(
+                f"{type(self).__name__} may encode by a route other than its "
+                "tokenizers backend"
+            )
+        return merge_model_from_backend(self._rust(), self._name, encode_add_special_tokens=True)
 
     def encode_with_offsets(self, text: str) -> Tuple[List[int], Optional[List[Tuple[int, int]]]]:
         """Encode text using custom BPE tokenizer and return offsets."""
